@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Personal resume — drop yours in but don't commit it
+*Resume*.pdf
+*Resume*.docx
+*resume*.pdf
+*resume*.docx
+
+# Generated state (per-user, regenerated each session)
+applications-log.csv
+seen-jobs.csv
+session-state.json
+ats-accounts.txt
+scheduled-runs.log
+
+# Generated cover letters (per-job)
+cover-letters/*.txt
+cover-letters/*.md
+!cover-letters/.gitkeep
+
+# Persistent browser profile (logins, cookies — NEVER commit)
+browser-profile/*
+!browser-profile/.gitkeep
+
+# Playwright MCP scratch
+.playwright-mcp/
+
+# Local Claude Code settings (per-user)
+.claude/settings.local.json
+
+# Screenshots / debug artifacts
+*.png
+*.jpeg
+*.jpg

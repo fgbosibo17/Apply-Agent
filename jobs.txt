@@ -1,0 +1,5 @@
+# Paste job URLs below, one per line
+# Example:
+# https://boards.greenhouse.io/somecompany/jobs/12345
+# https://jobs.lever.co/anothercompany/67890
+# https://www.linkedin.com/jobs/view/9876543210
