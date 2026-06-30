@@ -43,10 +43,12 @@ cover-letters/*.txt
 cover-letters/*.md
 !cover-letters/.gitkeep
 
-# Persistent browser profile — contains LinkedIn cookies, Google session,
-# ATS logins. NEVER commit. Folder itself is tracked via .gitkeep.
+# Persistent browser profiles — contain LinkedIn cookies, Google session,
+# ATS logins. NEVER commit (anyone could log in as you). Covers every per-persona
+# profile folder (browser-profile-<persona>) + any snapshots/backups.
 browser-profile/*
 !browser-profile/.gitkeep
+browser-profile-*/
 
 # Playwright MCP scratch
 .playwright-mcp/
@@ -58,3 +60,12 @@ browser-profile/*
 *.png
 *.jpeg
 *.jpg
+
+# Local recovery backups created during runs (not the source of truth — the live
+# seen-jobs.csv / applications-log.csv are). Keep the repo clean of these.
+*.bak.csv
+*.backup.csv
+*.backup2.csv
+*.backup.json
+*.bak.json
+dryrun-*.txt

@@ -1,10 +1,12 @@
 {
-  "name": "job-agent",
+  "name": "autonomous-job-apply-agent",
   "version": "1.0.0",
-  "description": "AI-powered job application agent using Claude + Playwright MCP",
+  "description": "AI-driven agent that discovers and applies to remote/hybrid jobs across ATSs (Greenhouse/Lever/Ashby/Workable/SmartRecruiters) — quality answers, EEO, captcha-aware, dedup.",
   "private": true,
   "scripts": {
-    "setup": "npx playwright install chromium"
+    "setup": "npx playwright install chrome",
+    "discover": "node src/discover-api.js",
+    "apply": "node src/index.js"
   },
   "dependencies": {
     "playwright": "^1.50.0",

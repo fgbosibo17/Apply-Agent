@@ -14,7 +14,7 @@
    - Fill out the REQUIRED fields in `📝 APPLICATION ANSWERS` below from your resume
    - Ask you a short list of questions for things not in the resume (salary expectations, demographics for EEO, work auth status, citizenship, etc.)
    - Save everything back into this file
-   - **Open a browser and walk you through logging into LinkedIn** (and optionally Google for ATS OAuth) — the session is saved in `./browser-profile` so you only do this once
+   - **Open a browser and walk you through logging into LinkedIn** (and optionally Google for ATS OAuth) — the session is saved in `./browser-profile-primary` so you only do this once
    - Confirm with you before going live
 5. Once setup is done, say **`go`** to start the job application workflow.
 
@@ -46,11 +46,11 @@ MIN_MATCH_SCORE: 7
 
 # Salary floor in USD. Jobs that publicly list below this are skipped.
 # Jobs with no salary published are still considered.
-MIN_SALARY: 100000
+MIN_SALARY: 95000
 
 # Comma-separated location filters. "Remote-US" = US-remote roles only.
 # Add "Hybrid-<City>" to allow hybrid roles in a specific city.
-LOCATIONS_OK: Remote-US, Hybrid-US (1-2 days/week only)
+LOCATIONS_OK: Remote-US, Hybrid-<City> (1-2 days/week)
 
 # Whether the agent should ASK before each application or apply silently.
 # "auto" = apply without asking. "confirm" = show the match and wait for "go".
@@ -61,8 +61,28 @@ APPLY_MODE: auto
 SKIP_CHANNELS:
 
 # Channels to prioritize first this session. Leave blank to round-robin Tier 1 → 4.
-PRIORITY_CHANNELS: greenhouse, lever, ashby, workable
+# PRIMARY = the logged-in job boards (richer, fresher, better-matched results
+# because we're authenticated). These are the default discovery surface going
+# forward. Each still requires clicking through to the company ATS to apply.
+PRIORITY_CHANNELS: linkedin, builtin, wellfound, workatastartup, welcometothejungle, dice, ziprecruiter, indeed
+
+# Logged-in boards available per identity (both profiles signed in):
+#   linkedin, builtin, wellfound, workatastartup, welcometothejungle,
+#   dice, ziprecruiter, indeed (same account covers simplyhired)
+# Aggregators (no login — click through to company ATS): nodesk, workingnomads
+# Google site: searches (greenhouse/lever/ashby/workable) remain a SECONDARY
+# fallback when the logged-in boards run dry for a query.
+LOGGED_IN_BOARDS: linkedin, builtin, wellfound, workatastartup, welcometothejungle, dice, ziprecruiter, indeed
 ```
+
+> **⚠️ APPLY STRATEGY — EXTERNAL ATS ONLY (decided 2026-06-11).**
+> Boards are for **discovery**; applications are submitted **only on external company
+> ATSs** (Greenhouse, Lever, Ashby, Workable, etc.) where our handlers work reliably.
+> **Do NOT automate LinkedIn Easy Apply** (or ZipRecruiter/Indeed 1-click): LinkedIn's
+> current build blocks automated Easy Apply (obfuscated DOM, modal won't open for bots)
+> and automating it **risks getting the user's LinkedIn account banned**. Easy-Apply-only
+> listings are logged `Skipped` (reason: "Easy Apply only - external-ATS-only mode").
+> `src/ats/linkedin-easyapply.js` exists but is intentionally NOT wired into the runner.
 
 **How the agent uses this config:**
 1. At session start, the agent reads this block and uses these values for the entire session.
@@ -70,6 +90,25 @@ PRIORITY_CHANNELS: greenhouse, lever, ashby, workable
 3. `MAX_JOBS_EVALUATED` is the *safety* stop condition — if the agent burns through this many listings without hitting `SESSION_TARGET`, it stops anyway and reports the low hit rate.
 4. If the user says e.g. "apply to 50 jobs today" in the prompt, that overrides `SESSION_TARGET` for that run.
 5. `MIN_MATCH_SCORE`, `MIN_SALARY`, `LOCATIONS_OK` are filters applied during evaluation — a job that fails any of them is logged as Skipped without opening the application page.
+
+---
+
+## 🎭 PERSONAS (3 resumes, 2 identities — READ THIS BEFORE APPLYING)
+
+> The agent applies as **three personas across two identities**. Persona definitions (full answer sets) live in `src/personas.js`. Select with the `PERSONA` env var when running batch scripts (`qa` | `cloud` | `fullstack`). **There is NO default persona — every run must state one explicitly, and the agent must ASK THE USER which persona(s) to run when the user hasn't said.** Same for manual MCP applications: before applying, confirm which persona the job belongs to.
+
+| Persona | Identity | Email | Phone | LinkedIn | Resume | Browser profile |
+|---------|----------|-------|-------|----------|--------|-----------------|
+| **primary** | <Your Full Name> | you@example.com | +1 000-000-0000 | linkedin.com/in/your-handle | `Resume/Your_Resume_A.pdf` | `./browser-profile-primary` |
+| **adjacent** | <Your Full Name> | you2@example.com | +1 000-000-0000 | linkedin.com/in/your-handle-2 | `Resume/Your_Resume_B.pdf` | `./browser-profile-secondary` |
+| **secondary** | <Your Full Name> | you2@example.com | +1 000-000-0000 | linkedin.com/in/your-handle-2 | `Resume/Your_Resume_C.pdf` | `./browser-profile-secondary` |
+
+**Hard rules:**
+1. **Never mix identities on one application.** Resume header, form answers, and the logged-in job-board account must ALL match the persona. Cloud + FullStack share accounts/logins; QA is fully separate.
+2. **Route jobs by JD:** QA/SDET/testing keywords → `qa`. Cloud/DevOps/SRE/platform → `cloud`. Full-stack/frontend/backend/software engineer → `fullstack`. Router: `routePersona()` in `src/personas.js`.
+3. **Per-persona dedupe:** the same job may be applied to by ONLY ONE persona — never apply twice to one job with different identities.
+4. **Browser profiles:** re-run logins with `node setup-browser-login.js primary` or `node setup-browser-login.js secondary`. Both identities have accounts on: LinkedIn, Builtin, Wellfound, WorkAtAStartup, WelcomeToTheJungle, Dice, ZipRecruiter, Indeed (same account covers SimplyHired). NoDesk + WorkingNomads are aggregators — no login, click through to the company ATS.
+5. The `📝 APPLICATION ANSWERS` block below remains the source of truth for the **qa** persona only. Cloud/FullStack values live in `src/personas.js`.
 
 ---
 
@@ -89,46 +128,46 @@ PRIORITY_CHANNELS: greenhouse, lever, ashby, workable
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
 # ─── IDENTITY (required) ────────────────────────────────────────────────────
-FIRST_NAME: <FILL_ME_IN>
-LAST_NAME: <FILL_ME_IN>
-FULL_NAME: <FILL_ME_IN>
-EMAIL: <FILL_ME_IN>
+FIRST_NAME: <First>
+LAST_NAME: <Last>
+FULL_NAME: <Your Full Name>
+EMAIL: you@example.com
 PHONE_COUNTRY_CODE: "+1"            # always quote so leading + is kept
-PHONE_NUMBER: <FILL_ME_IN>          # digits-only form
-PHONE_FULL: <FILL_ME_IN>            # e.g. "+1 555-123-4567"
+PHONE_NUMBER: "0000000000"          # digits-only form
+PHONE_FULL: "+1 000-000-0000"       # e.g. "+1 555-123-4567"
 
 # ─── LOCATION (required) ────────────────────────────────────────────────────
-CITY: <FILL_ME_IN>
-STATE: <FILL_ME_IN>                 # 2-letter code, e.g. CA, TX, NY
+CITY: <City>
+STATE: <ST>                           # 2-letter code, e.g. CA, <ST>, NY
 COUNTRY: United States
 COUNTRY_CODE: US
-FULL_ADDRESS_ONE_LINE: <FILL_ME_IN> # e.g. "Austin, TX, United States"
+FULL_ADDRESS_ONE_LINE: "<City, ST>, United States"
 
 # ─── LINKS (required) ───────────────────────────────────────────────────────
-LINKEDIN_URL: <FILL_ME_IN>          # e.g. https://www.linkedin.com/in/your-handle/
+LINKEDIN_URL: https://www.linkedin.com/in/your-handle/
 
 # ─── WORK AUTHORIZATION (required) ──────────────────────────────────────────
-AUTHORIZED_TO_WORK_US: <FILL_ME_IN>     # "Yes" or "No"
-NEED_SPONSORSHIP_NOW: <FILL_ME_IN>      # "Yes" or "No"
-NEED_SPONSORSHIP_FUTURE: <FILL_ME_IN>   # "Yes" or "No"
-US_CITIZEN: <FILL_ME_IN>                # "Yes" or "No"
-WORK_AUTH_STATUS: <FILL_ME_IN>          # e.g. "US Citizen", "Green Card / Permanent Resident", "H1B Visa", "F1 OPT", etc.
+AUTHORIZED_TO_WORK_US: "Yes"
+NEED_SPONSORSHIP_NOW: "No"
+NEED_SPONSORSHIP_FUTURE: "No"
+US_CITIZEN: "No"
+WORK_AUTH_STATUS: Green Card / Permanent Resident
 
 # ─── SALARY EXPECTATIONS (required) ─────────────────────────────────────────
-SALARY_MIN: <FILL_ME_IN>            # number, no $ or comma, e.g. 100000
-SALARY_MAX: <FILL_ME_IN>            # number, e.g. 180000
-SALARY_TARGET_SINGLE: <FILL_ME_IN>  # number for single-value salary fields
-SALARY_RANGE_STRING: <FILL_ME_IN>   # free-text, e.g. "$130,000 - $160,000"
+SALARY_MIN: 95000
+SALARY_MAX: 130000
+SALARY_TARGET_SINGLE: 115000
+SALARY_RANGE_STRING: "$100,000 - $130,000"
 
 # ─── START DATE / AVAILABILITY (required) ───────────────────────────────────
 NOTICE_PERIOD: 2 weeks
 EARLIEST_START_DATE: 2 weeks from offer acceptance
 
 # ─── WORK PREFERENCES (required) ────────────────────────────────────────────
-PREFERRED_WORK_TYPE: <FILL_ME_IN>   # Remote | Hybrid | Onsite
-OPEN_TO_HYBRID: <FILL_ME_IN>        # "Yes" or "No"
-OPEN_TO_ONSITE: <FILL_ME_IN>        # "Yes" or "No"
-WILLING_TO_RELOCATE: <FILL_ME_IN>   # "Yes" or "No"
+PREFERRED_WORK_TYPE: Remote
+OPEN_TO_HYBRID: "Yes"
+OPEN_TO_ONSITE: "No"
+WILLING_TO_RELOCATE: "No"
 
 # ─── BACKGROUND / CONSENT (required) ────────────────────────────────────────
 CONSENT_BACKGROUND_CHECK: "Yes"
@@ -141,26 +180,26 @@ WORKED_HERE_BEFORE: "No"
 HOW_DID_YOU_HEAR: LinkedIn
 
 # ─── EEO / DEMOGRAPHICS (required on most US apps) ──────────────────────────
-GENDER: <FILL_ME_IN>                # e.g. "Male", "Female", "Non-binary", "Prefer not to say"
-ETHNICITY: <FILL_ME_IN>             # e.g. "White", "Black or African American", "Asian", "Hispanic or Latino", etc.
-RACE: <FILL_ME_IN>                  # same as ETHNICITY typically
-HISPANIC_LATINO: <FILL_ME_IN>       # "Yes" or "No"
+GENDER: <Male | Female | Non-binary | Prefer not to say>
+ETHNICITY: <e.g. Asian | Black or African American | Hispanic or Latino | White | Two or more races | Prefer not to say>
+RACE: <e.g. Asian | Black or African American | Hispanic or Latino | White | Two or more races | Prefer not to say>
+HISPANIC_LATINO: "No"
 VETERAN_STATUS: I am not a protected veteran
 DISABILITY_STATUS: No, I do not have a disability
 
 # ─── EMPLOYMENT STATUS (required) ───────────────────────────────────────────
-CURRENTLY_EMPLOYED: <FILL_ME_IN>    # "Yes" or "No"
-EMPLOYMENT_STATUS: <FILL_ME_IN>     # e.g. "Full-time, employed", "Unemployed, actively looking", "Freelance"
-REASON_FOR_LEAVING: <FILL_ME_IN>    # 1-2 sentence reusable answer
+CURRENTLY_EMPLOYED: "Yes"
+EMPLOYMENT_STATUS: "Full-time, employed"
+REASON_FOR_LEAVING: "<1 sentence — why you are looking for a new role>"
 CAN_CONTACT_CURRENT_EMPLOYER: "No"  # almost always "No" until offer stage
 
 # ─── ENGAGEMENT TYPE (required) ─────────────────────────────────────────────
 OPEN_TO_FULL_TIME: "Yes"
-OPEN_TO_CONTRACT: <FILL_ME_IN>      # "Yes" or "No"
+OPEN_TO_CONTRACT: "Yes"
 
 # ─── ROLE BLURB (required — used in open-text "tell us about you" fields) ───
-WHY_THIS_ROLE_BLURB: <FILL_ME_IN>   # 2-3 sentences about why you want this kind of role
-ELEVATOR_PITCH: <FILL_ME_IN>        # 1-sentence summary of who you are professionally
+WHY_THIS_ROLE_BLURB: "<2-3 sentences for open-ended 'why this role' fields — your motivation plus your top strengths>"
+ELEVATOR_PITCH: "<1 sentence: who you are + your specialty + years of experience>"
 
 # ─── ATTESTATIONS (required — every form has these checkboxes) ──────────────
 CERTIFY_TRUTHFUL_ANSWERS: "Yes"
@@ -168,20 +207,20 @@ AGREE_TO_TERMS: "Yes"
 AGREE_TO_PRIVACY_POLICY: "Yes"
 
 # ─── EDUCATION (required) ───────────────────────────────────────────────────
-HIGHEST_DEGREE: <FILL_ME_IN>        # e.g. "Bachelor's Degree", "Master's Degree", "PhD"
-HIGHEST_DEGREE_FIELD: <FILL_ME_IN>  # e.g. "Computer Science"
-HIGHEST_DEGREE_SCHOOL: <FILL_ME_IN> # e.g. "Stanford University"
-UNDERGRAD_DEGREE: <FILL_ME_IN>
-UNDERGRAD_FIELD: <FILL_ME_IN>
-UNDERGRAD_SCHOOL: <FILL_ME_IN>
+HIGHEST_DEGREE: Master's Degree
+HIGHEST_DEGREE_FIELD: <Your Field of Study>
+HIGHEST_DEGREE_SCHOOL: <Your University>
+UNDERGRAD_DEGREE: Bachelor's Degree
+UNDERGRAD_FIELD: Computer Science
+UNDERGRAD_SCHOOL: <Your University>
 
 # ─── CURRENT JOB (required) ─────────────────────────────────────────────────
-CURRENT_EMPLOYER: <FILL_ME_IN>
-CURRENT_TITLE: <FILL_ME_IN>
-TOTAL_YEARS_EXPERIENCE: <FILL_ME_IN>
+CURRENT_EMPLOYER: <Current Employer>
+CURRENT_TITLE: <Your Current Title>
+TOTAL_YEARS_EXPERIENCE: 9
 
 # ─── RESUME (required) ──────────────────────────────────────────────────────
-RESUME_FILE: <FILL_ME_IN>           # path relative to project root, e.g. "Resume/MyResume.pdf"
+RESUME_FILE: Resume/Your_Resume_A.pdf
 
 # ─── COVER LETTER (required toggle) ─────────────────────────────────────────
 COVER_LETTER_ENABLED: true
@@ -209,11 +248,11 @@ PRONOUNS:                           # e.g. "He/Him", "She/Her", "They/Them"
 DATE_OF_BIRTH:                      # leave blank — never give DOB unless legally required
 
 # ─── LOCATION EXTRAS (optional) ─────────────────────────────────────────────
-STATE_FULL:                         # e.g. "Texas" (agent infers from STATE if blank)
+STATE_FULL: <State>
 ZIP:                                # quoted if leading zero
 ADDRESS_LINE_1:
 ADDRESS_LINE_2:
-TIMEZONE:                           # e.g. "America/Chicago"
+TIMEZONE: <Your/Timezone>
 
 # ─── LINKS (optional) ───────────────────────────────────────────────────────
 PORTFOLIO_URL:                      # falls back to LINKEDIN_URL if blank
@@ -372,15 +411,15 @@ SPEAKING_SAMPLES_URL:
 YEARS_AT_CURRENT_EMPLOYER:
 CAN_CONTACT_PAST_EMPLOYERS: "Yes"
 NOTIFY_PERIOD_TO_CURRENT_EMPLOYER: 2 weeks
-CURRENT_EMPLOYER_LOCATION:
-CURRENT_EMPLOYER_INDUSTRY:
+CURRENT_EMPLOYER_LOCATION: Boston, MA (Remote)
+CURRENT_EMPLOYER_INDUSTRY: Healthcare / Telehealth
 
 # ─── COVER LETTER EXTRAS (optional) ─────────────────────────────────────────
 COVER_LETTER_SAVE_DIR: cover-letters/
 COVER_LETTER_SIGNATURE:             # falls back to FULL_NAME if blank
 
 # ─── RESUME EXTRAS (optional) ───────────────────────────────────────────────
-RESUME_DOCX:                        # .docx source file if you have one
+RESUME_DOCX: Resume/Your_Resume_A.docx
 
 # ─── OTHER OPTIONAL ─────────────────────────────────────────────────────────
 LANGUAGES_SPOKEN: English (native)
@@ -397,7 +436,7 @@ SOCIAL_MEDIA_HANDLES:
 3. **OPTIONAL fields: Claude infers when blank — never skips and never asks the user.**
    When an optional key is blank and the form asks for that data, Claude generates a sensible answer using this priority:
 
-   - **(a) Derive from REQUIRED fields** — e.g. blank `STATE_FULL` → look up the long name of `STATE` ("TX" → "Texas"). Blank `VISA_TYPE` → derive from `WORK_AUTH_STATUS`. Blank `EARLIEST_START_DATE_SHORT` → derive from `EARLIEST_START_DATE`.
+   - **(a) Derive from REQUIRED fields** — e.g. blank `STATE_FULL` → look up the long name of `STATE` ("CA" → "California"). Blank `VISA_TYPE` → derive from `WORK_AUTH_STATUS`. Blank `EARLIEST_START_DATE_SHORT` → derive from `EARLIEST_START_DATE`.
    - **(b) Derive from the resume** — e.g. blank `CURRENT_EMPLOYER_INDUSTRY` → infer from the most recent role on the resume. Blank `HIGHEST_DEGREE_GRAD_YEAR` → read from the education section.
    - **(c) Derive from the job description** — e.g. blank `WHY_THIS_COMPANY_BLURB` → write a 2-sentence company-specific blurb from the JD.
    - **(d) Use a safe, neutral default** when nothing else fits:
@@ -449,7 +488,21 @@ Inferred from the resume + `CURRENT_TITLE`. The agent should derive 5-15 search-
 # Optional — list specific role titles to search for, one per line.
 # Leave blank to let the agent infer from the resume.
 TARGET_ROLES:
-  -
+  - Senior SDET remote
+  - Staff SDET remote
+  - Principal SDET remote
+  - Senior <Your Current Title> remote
+  - Staff <Your Current Title> remote
+  - Senior QA Architect remote
+  - Staff QA Architect remote
+  - Automation Architect remote
+  - QA Engineering Manager remote
+  - Senior Software Engineer in Test remote
+  - Staff Software Engineer in Test remote
+  - Principal Quality Engineer remote
+  - Senior Test Automation Engineer remote
+  - Lead QA Engineer remote
+  - Senior Quality Engineer Playwright remote
 ```
 
 ### Core Technical Skills
@@ -721,7 +774,7 @@ Many ATS systems (especially Workday, Greenhouse, iCIMS) will parse your uploade
 
 ## BROWSER PERSISTENCE
 
-Always launch the browser with a persistent context stored at `./browser-profile`. This preserves:
+Always launch the browser with a persistent context stored at `./browser-profile-primary`. This preserves:
 - LinkedIn login session
 - Google login session (for OAuth on ATS platforms)
 - ATS account logins (Workday, iCIMS, etc.)
@@ -736,7 +789,7 @@ If the browser profile directory doesn't exist yet, create it on first launch. O
 ### First Ever Run (no browser-profile/ contents yet)
 **This path should rarely fire** — the SETUP WIZARD (Step 6) already walks the user through LinkedIn + Google login when they ran `setup`. If `browser-profile/` is empty when the user says `go`, it usually means they skipped setup or deleted the folder. Handle it gracefully:
 
-1. Launch browser with persistent profile at `./browser-profile`
+1. Launch browser with persistent profile at `./browser-profile-primary`
 2. Navigate to `linkedin.com`
 3. **STOP and tell the user:** "Your browser profile is empty — looks like LinkedIn isn't logged in yet (this normally happens during `setup`). Please sign in now — I won't touch the password field."
 4. Wait for the user to confirm they're logged in
@@ -746,7 +799,7 @@ If the browser profile directory doesn't exist yet, create it on first launch. O
 8. Begin the discovery + application workflow
 
 ### Returning Session (browser-profile/ has saved sessions)
-1. Launch browser with the existing persistent profile at `./browser-profile`
+1. Launch browser with the existing persistent profile at `./browser-profile-primary`
 2. Navigate to `linkedin.com` — verify the session is still active (look for the user's profile icon or feed)
 3. **If still logged in:** Proceed directly to the workflow. Tell the user: "Browser session loaded. LinkedIn is still logged in. Starting job search."
 4. **If session expired:** Tell the user: "LinkedIn session expired. Please re-login." Wait for confirmation, then continue.
@@ -962,12 +1015,12 @@ Use sensible defaults for everything else (notice period: 2 weeks, consent field
 4. On change → make the requested edit, re-show, re-ask.
 
 ### Step 6 — Set up the persistent browser profile (LinkedIn + Google logins)
-**Do this during setup so the first `go` doesn't get blocked by login walls.** The persistent profile at `./browser-profile` is what stores LinkedIn / Google / ATS sessions across runs. If it's empty, the agent has to interrupt every workflow for logins.
+**Do this during setup so the first `go` doesn't get blocked by login walls.** The persistent profile at `./browser-profile-primary` is what stores LinkedIn / Google / ATS sessions across runs. If it's empty, the agent has to interrupt every workflow for logins.
 
-1. Check if `./browser-profile` already has saved session data:
+1. Check if `./browser-profile-primary` already has saved session data:
    - If it exists and looks populated (cookies / Local Storage files present) → tell the user: "Browser profile already exists. Skipping login step. If you want to refresh logins, delete the `browser-profile` folder and re-run `setup`." → jump to Step 7.
    - If empty or missing → continue.
-2. Launch the browser with the persistent context pointed at `./browser-profile` (create the folder if missing).
+2. Launch the browser with the persistent context pointed at `./browser-profile-primary` (create the folder if missing).
 3. **LinkedIn login (required — it's the primary discovery channel):**
    - Navigate to `https://www.linkedin.com/login`.
    - Tell the user: "I've opened LinkedIn. Please sign in now — I won't touch the password field. Say `done` when you're logged in and you can see your feed."
