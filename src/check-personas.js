@@ -14,20 +14,18 @@ for (const [name, a] of Object.entries(personas)) {
   );
 }
 
-// Router smoke tests
-const cases = [
-  ['Senior SDET', 'qa'],
-  ['QA Automation Engineer', 'qa'],
-  ['DevOps Engineer AWS', 'cloud'],
-  ['Site Reliability Engineer', 'cloud'],
-  ['Full Stack Engineer React Node', 'fullstack'],
-  ['Software Engineer', 'fullstack'],
-  ['Marketing Manager', null],
+// Router check — shows which persona each example title routes to, based on YOUR
+// matchKeywords in personas.js. Edit the titles below to ones you actually target
+// and confirm they route to the right persona (null = no persona matched).
+console.log('\nRouter (routePersona) — verify your matchKeywords catch your target titles:');
+const titles = [
+  'Senior Software Engineer',
+  'Product Manager',
+  'Data Analyst',
+  'Marketing Manager',
+  // ↑ replace these with the real job titles you want to apply to
 ];
-let pass = 0;
-for (const [title, want] of cases) {
-  const got = routePersona(title);
-  if (got === want) pass++;
-  else console.log('ROUTER MISMATCH:', title, '→', got, '(wanted', want + ')');
+for (const title of titles) {
+  console.log('  ' + title.padEnd(34) + '→ ' + (routePersona(title) || '(no persona matched)'));
 }
-console.log(`Router: ${pass}/${cases.length} cases pass`);
+console.log('\nIf a title you want shows "(no persona matched)", widen that persona\'s\nmatchKeywords regex in src/personas.js.');

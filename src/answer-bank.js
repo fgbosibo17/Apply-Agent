@@ -33,7 +33,9 @@ const PROFILE = {
     monitor: 'the standard tools and reporting in my field',
     role: 'my field',
   },
-  // ── Example profiles (rename/replace with your personas) ──
+  // ── Example profiles. Rename these keys to your persona names from
+  // personas.js (primary / adjacent / secondary) once each persona's real stack
+  // is filled in; until then every persona safely uses `default` above. ──
   cloud: {
     stack: 'AWS and Azure, Kubernetes (EKS/AKS), Terraform, and CI/CD pipelines',
     monitor: 'Datadog, CloudWatch, Prometheus, Grafana, and Splunk',

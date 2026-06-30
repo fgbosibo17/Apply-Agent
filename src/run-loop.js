@@ -76,7 +76,7 @@ function runBatch(profile, target, logFile) {
   let profile = BASE_PROFILE + (profileSeq || '');
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     const before = appliedCount();
-    console.log(`\n=== Round ${round}: cloud applied = ${before} / ${TARGET} | profile ${profile} | ${new Date().toISOString()} ===`);
+    console.log(`\n=== Round ${round}: ${COUNT_PERSONA} applied = ${before} / ${TARGET} | profile ${profile} | ${new Date().toISOString()} ===`);
     if (before >= TARGET) { console.log(`TARGET REACHED (${before})`); break; }
     const t = Math.min(BATCH, TARGET - before);
     cleanProfile(profile);
@@ -90,5 +90,5 @@ function runBatch(profile, target, logFile) {
     // fresh profile so we don't stall forever on a corrupted one.
     if (gained === 0) { profileSeq += 1; profile = BASE_PROFILE + profileSeq; console.log(`   rotating to fresh profile: ${profile}`); }
   }
-  console.log(`\n=== LOOP DONE. Final cloud applied: ${appliedCount()} / ${TARGET} ===`);
+  console.log(`\n=== LOOP DONE. Final ${COUNT_PERSONA} applied: ${appliedCount()} / ${TARGET} ===`);
 })();

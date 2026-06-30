@@ -1,6 +1,6 @@
 // Dry-run fill test: open ATS URLs, run the REAL handler with DRY_RUN
 // (fills everything, screenshots, does NOT submit). Reports unfilled required.
-// Usage: PERSONA=qa DRY_RUN=1 node src/dbg-fill.js <url> [url2 ...]
+// Usage: PERSONA=primary DRY_RUN=1 node src/dbg-fill.js <url> [url2 ...]
 const { chromium } = require('playwright');
 const { applyGreenhouse } = require('./ats/greenhouse');
 const { applyLever } = require('./ats/lever');

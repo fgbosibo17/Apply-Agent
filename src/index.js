@@ -14,7 +14,7 @@ const answers = require('./answers'); // throws if PERSONA not set — intention
 
 // Each persona carries its own browser profile (and identity). No default.
 // BROWSER_PROFILE env overrides it (used to switch to a fresh profile if the
-// persona's profile gets corrupted — cloud ATS applies need no login anyway).
+// persona's profile gets corrupted — most ATS applies need no login anyway).
 const PROFILE_DIR = process.env.BROWSER_PROFILE
   ? path.resolve(__dirname, '..', process.env.BROWSER_PROFILE)
   : answers.browserProfile;

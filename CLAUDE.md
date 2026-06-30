@@ -995,6 +995,22 @@ Use Edit to replace each `<FILL_ME_IN>` placeholder in APPLICATION ANSWERS with 
 - `RESUME_FILE` to the actual filename of the user's resume
 - `ELEVATOR_PITCH` to a 1-sentence summary derived from the resume's headline + top skills
 
+### Step 3b — Also fill `src/personas.js` (the node-runner's data source)
+**This is what makes both run paths work.** `CLAUDE.md` (APPLICATION ANSWERS) drives the
+Claude-Code/MCP path; `src/personas.js` drives the headless `node` path (`discover-api.js`,
+`index.js`, `run-loop.js`). They must hold the **same identity + answers**. After Step 3/4,
+open `src/personas.js` and replace its `<FILL_ME_IN>` placeholders so they match:
+- For the **primary** persona: copy the same name, email, phone, city/state, LinkedIn,
+  work-authorization, EEO, salary, current employer/title, and `resumePath` you just put in
+  APPLICATION ANSWERS.
+- Set each persona's **`matchKeywords`** regex to the job titles that persona should claim
+  (derive from the resume + the user's `TARGET_ROLES`), and `targetRoles` to the search-query
+  titles. Run `node src/check-personas.js` to confirm your target titles route correctly and
+  every `resumePath` resolves.
+- If the user only has **one** resume/identity, just fill the `primary` persona and leave
+  `adjacent`/`secondary` as-is (or point them at the same resume) — the runner only needs the
+  persona you pass via `PERSONA=`.
+
 ### Step 4 — Ask the user the things NOT in the resume
 Use AskUserQuestion (or a simple chat prompt) to collect ONLY these:
 

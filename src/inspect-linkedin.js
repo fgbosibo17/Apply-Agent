@@ -2,7 +2,7 @@
 // apply-button markup, clicks Easy Apply, and dumps the modal structure so we
 // can fix selectors with ground truth instead of guessing.
 //
-//   PERSONA=cloud node src/inspect-linkedin.js <jobViewUrl>
+//   PERSONA=primary node src/inspect-linkedin.js <jobViewUrl>
 
 const { chromium } = require('playwright');
 const answers = require('./answers');

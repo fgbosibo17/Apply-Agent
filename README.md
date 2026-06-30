@@ -71,6 +71,16 @@ PERSONA=primary SESSION_TARGET=25 node src/index.js
 PERSONA=primary TARGET=100 BATCH=25 node src/run-loop.js
 ```
 
+**Location filtering:** discovery keeps **remote-US** roles for everyone by default. To
+*also* keep **hybrid** roles in your area, either fill your `city`/`state` in `personas.js`
+(the agent uses them automatically) or set `HYBRID_METRO` for a run:
+
+```bash
+PERSONA=primary HYBRID_METRO="Austin,Round Rock,TX,Texas" node src/discover-api.js
+```
+
+If neither is set, hybrid roles are skipped (you still get all the remote-US jobs).
+
 `DRY_RUN=1` fills every field and screenshots **without submitting** — use it to verify quality before going live.
 
 ---
@@ -95,6 +105,54 @@ seen-jobs.csv         every job evaluated (dedup) — starts empty
 ```
 
 **Never committed** (gitignored): your `Resume/*`, `browser-profile-*/` (login cookies — keep these private!), generated cover letters, and your real `applications-log.csv` / `seen-jobs.csv` once you start running.
+
+> **Two run paths, one set of facts.** Driving it **with Claude Code** ("setup" → "go") fills forms from the `📝 APPLICATION ANSWERS` block in `CLAUDE.md`. Running the **node loop** headlessly reads `src/personas.js`. The `setup` wizard fills **both**; if you edit by hand, keep the two in sync (they hold the same identity + answers).
+
+---
+
+## Driving it with Claude Code — example prompts
+
+Open the folder in [Claude Code](https://claude.com/claude-code) and talk to it. The most reliable pattern is a **`/goal`** (it keeps the agent working until the goal is met), with the same details you'd give a human assistant: how many, what titles, where, which resume, and "review before submitting."
+
+**First-time setup**
+```
+setup
+```
+> Reads your resume, fills your profile + personas.js, and walks you through browser logins.
+
+**Then kick off applications with a /goal:**
+```
+/goal apply to 50 jobs with my resume — remote US or hybrid in Austin — for
+Software Engineer, Backend Engineer, and Full Stack roles. Review every answer
+before submitting so nothing is junk, and only count successful submissions.
+```
+
+```
+/goal apply to 200 remote Product Manager and Program Manager jobs using my
+primary persona. If a form asks whether the application was prepared by AI, say no.
+Skip anything requiring security clearance. Count only confirmed submissions.
+```
+
+```
+/goal find and apply to 30 Data Analyst / Data Quality roles (remote or hybrid
+Texas). Proof-read each application before you submit it, and don't apply to the
+same job twice.
+```
+
+**Smaller, conversational asks also work:**
+```
+go                          (discover + apply toward the SESSION_TARGET in CLAUDE.md)
+discover 300 jobs for my primary persona, then apply to the best 25
+apply to the jobs in jobs.txt
+do a DRY RUN on the next 3 jobs so I can review the answers before any real submit
+how many have I applied to today? show me the breakdown by company
+```
+
+**Tips that map to how I built it:**
+- Always say **"review/proof-read before submitting"** and **"only count successful"** — the agent has a proof-read pass and logs only confirmed submissions, and saying so reinforces it.
+- Name the **titles, location, and resume/persona** explicitly — vague asks get vague targeting.
+- For big runs, ask it to **run in batches with a fresh browser** (it does this via `run-loop.js`) so long sessions don't degrade.
+- Use **`DRY_RUN`** ("do a dry run first") to eyeball answer quality before going live.
 
 ---
 

@@ -2,8 +2,8 @@
 // Runs INSIDE the persona's browser profile so the board logins are active —
 // logged-in LinkedIn returns far better, fresher, better-matched listings.
 //
-//   PERSONA=cloud node src/discover.js
-//   PERSONA=cloud node src/discover.js --max 60
+//   PERSONA=primary node src/discover.js
+//   PERSONA=primary node src/discover.js --max 60
 //
 // Output: appends de-duped candidates to queue.json (source-tagged) so the
 // apply runner (src/index.js) can process them. LinkedIn entries keep their

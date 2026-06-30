@@ -3,7 +3,7 @@
 // company-ATS apply URLs (greenhouse/lever/ashby/workable/...) which our handlers
 // can fill. Runs in the persona profile so logins are active.
 //
-//   PERSONA=cloud node src/discover-boards.js
+//   PERSONA=primary node src/discover-boards.js
 //
 // Appends de-duped candidates to queue-<persona>.json. Honest about blocks:
 // if a board shows a bot-check, it logs BLOCKED and moves on.

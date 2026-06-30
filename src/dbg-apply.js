@@ -1,6 +1,6 @@
 // DRY-RUN a single application through the real handler (no submit). Verifies
 // fill quality (EEO radios, screening answers) via a full-page screenshot.
-// Usage: PERSONA=cloud DRY_RUN=1 node src/dbg-apply.js <url> [company]
+// Usage: PERSONA=primary DRY_RUN=1 node src/dbg-apply.js <url> [company]
 const { chromium } = require('playwright');
 const { applyGreenhouse } = require('./ats/greenhouse');
 const { applyAshby } = require('./ats/ashby');

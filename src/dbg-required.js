@@ -1,5 +1,5 @@
 // Run the real handler (DRY) then report every still-EMPTY required field, so we
-// can see exactly what isn't filling. Usage: PERSONA=cloud node src/dbg-required.js <url>
+// can see exactly what isn't filling. Usage: PERSONA=primary node src/dbg-required.js <url>
 const { chromium } = require('playwright');
 const answers = require('./answers');
 const { applyGreenhouse } = require('./ats/greenhouse');

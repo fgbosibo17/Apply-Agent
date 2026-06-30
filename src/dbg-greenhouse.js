@@ -1,6 +1,6 @@
 // Debug probe: open a Greenhouse job, fetch its schema, and report how each
 // schema field maps to the live DOM (type, required, options, whether fillable).
-// Usage: PERSONA=qa node src/dbg-greenhouse.js <greenhouse-url>
+// Usage: PERSONA=primary node src/dbg-greenhouse.js <greenhouse-url>
 const { chromium } = require('playwright');
 const { fetchJson } = require('./ats-apis');
 

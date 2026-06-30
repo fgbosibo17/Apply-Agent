@@ -3,8 +3,8 @@
 // and appends de-duped candidates to a per-persona queue. No login needed, runs in
 // a throwaway profile so it never conflicts with the apply batch's cloud profile.
 //
-//   PERSONA=cloud node src/discover-ats.js
-//   PERSONA=cloud QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
+//   PERSONA=primary node src/discover-ats.js
+//   PERSONA=primary QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
 //
 // Queue file: queue-<persona>.json (candidates appended, deduped by URL).
 

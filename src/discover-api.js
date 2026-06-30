@@ -7,9 +7,9 @@
 // active persona's role keywords + US/remote eligibility, dedupes against
 // seen-jobs.csv and the existing queue, and appends matches to queue-<persona>.json.
 //
-//   PERSONA=qa        node src/discover-api.js
-//   PERSONA=cloud     node src/discover-api.js --max 120
-//   PERSONA=fullstack node src/discover-api.js --ats greenhouse,lever
+//   PERSONA=primary node src/discover-api.js
+//   PERSONA=primary node src/discover-api.js --max 800
+//   PERSONA=primary node src/discover-api.js --ats greenhouse,lever
 //
 // The apply runner (src/index.js) then processes queue-<persona>.json exactly
 // as before — discovery and application stay decoupled.
@@ -39,7 +39,7 @@ const ATS_FILTER = (arg('ats', '') || '').split(',').map((s) => s.trim()).filter
 const US_NAMES = /United States|\bUSA?\b|North America|Americas|New York|San Francisco|Austin|Seattle|Boston|Chicago|Denver|Atlanta|Los Angeles|Houston|Dallas|San Diego|Washington|Portland|Phoenix|Miami|Nashville|Raleigh|Charlotte|Salt Lake|Minneapolis|Philadelphia|Pittsburgh/i;
 // Two-letter US state codes — CASE-SENSITIVE so the conjunction "or" doesn't
 // match Oregon (OR), "in" doesn't match Indiana (IN), etc. Locations write
-// state codes uppercase ("Houston, TX"; "Remote, US").
+// state codes uppercase ("Denver, CO"; "Remote, US").
 const US_CODES = /\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/;
 const US_STRONG = { test: (s) => US_NAMES.test(s) || US_CODES.test(s) };
 // Location-agnostic remote markers with no country attached.
@@ -58,27 +58,46 @@ function loadQueue() {
   try { return JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8')); } catch { return []; }
 }
 
-// Texas markers (for hybrid-in-Texas eligibility).
-const TEXAS = /\b(TX|Texas|Houston|Austin|Dallas|San Antonio|Fort Worth|Plano|Irving|Frisco)\b/;
+// Hybrid eligibility = a hybrid role in YOUR metro. By default that's the active
+// persona's city / state / stateFull (from personas.js); override with the
+// HYBRID_METRO env var (comma-separated places, e.g.
+// HYBRID_METRO="Austin,Round Rock,TX,Texas"). If none resolve to a real value
+// (placeholders still in place), HYBRID_LOCAL is null → hybrid roles are skipped
+// and ONLY remote-US jobs are taken (the universal default that works for anyone).
+const isReal = (v) => v && !/<|fill_me_in|^xx$|^00000$/i.test(String(v).trim());
+function buildHybridMatcher() {
+  const env = (process.env.HYBRID_METRO || '').trim();
+  const ci = []; // multi-char names → case-insensitive (low false-positive)
+  const cs = []; // 2-letter state codes → CASE-SENSITIVE (so "IN"/"OR" don't match "in"/"or")
+  const add = (v) => { if (!isReal(v)) return; const s = String(v).trim(); (/^[A-Za-z]{2}$/.test(s) ? cs : ci).push(s); };
+  if (env) env.split(',').forEach(add);
+  else [answers.city, answers.stateFull, answers.state].forEach(add);
+  if (!ci.length && !cs.length) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const ciRe = ci.length ? new RegExp('\\b(' + ci.map(esc).join('|') + ')\\b', 'i') : null;
+  const csRe = cs.length ? new RegExp('\\b(' + cs.map((s) => esc(s.toUpperCase())).join('|') + ')\\b') : null;
+  return { test: (s) => (ciRe && ciRe.test(s)) || (csRe && csRe.test(s)) };
+}
+const HYBRID_LOCAL = buildHybridMatcher();
 // Non-US country markers — a remote role tied to one of these is NOT remote-US.
 const FOREIGN = /\bIndia\b|\bMumbai\b|\bBangalore\b|\bBengaluru\b|\bPune\b|\bHyderabad\b|\bChennai\b|\bDelhi\b|\bGurgaon\b|\bNoida\b|\bCanada\b|\bToronto\b|\bVancouver\b|\bOntario\b|\bLATAM\b|\bArgentina\b|\bMexico\b|\bColombia\b|\bBrazil\b|\bPeru\b|\bChile\b|\bUruguay\b|\bUkraine\b|\bPhilippines\b|\bSouth Africa\b|\bNigeria\b|\bKenya\b|\bEgypt\b|\bPakistan\b|\bIndonesia\b|\bVietnam\b|\bThailand\b|\bMalaysia\b|\bSingapore\b|\bGermany\b|\bBerlin\b|\bMunich\b|\bFrance\b|\bParis\b|\bSpain\b|\bMadrid\b|\bPortugal\b|\bLisbon\b|\bPoland\b|\bRomania\b|\bNetherlands\b|\bAmsterdam\b|\bIreland\b|\bDublin\b|\bUnited Kingdom\b|\bUK\b|\bLondon\b|\bEurope\b|\bEMEA\b|\bAPAC\b|\bAustralia\b|\bSydney\b|\bNew Zealand\b|\bJapan\b|\bTokyo\b|\bChina\b|\bShanghai\b|\bKorea\b|\bIsrael\b|\bTel Aviv\b/i;
 
 // Bare remote markers with NO place named → assume US-eligible.
 const REMOTE_BARE = /^[\s,/\-|()•]*(remote|remote[- ]?first|fully[- ]?remote|distributed|remote[- ]?us|us[- ]?remote)[\s,/\-|()•]*$/i;
 
-// STRICT eligibility for this goal: REMOTE in the USA, or HYBRID in Texas.
+// STRICT eligibility: REMOTE in the USA, or HYBRID in your own metro.
 // POSITIVE rule (a blocklist can't catch every foreign place):
-//   remote-US = remote AND (explicit US signal OR bare "Remote" with no place)
-//   hybrid-TX = hybrid AND a Texas location
-// Onsite-anywhere, remote tied to any named non-US place, and hybrid-outside-TX → skip.
+//   remote-US    = remote AND (explicit US signal OR bare "Remote" with no place)
+//   hybrid-local = hybrid AND a location in HYBRID_LOCAL (your persona metro / HYBRID_METRO)
+// Onsite-anywhere, remote tied to any named non-US place, and hybrid-elsewhere → skip.
 function locationEligible(loc, remoteFlag, workplaceType) {
   const L = (loc || '').trim();
   const wt = (workplaceType || '').toLowerCase();
   const isRemote = !!remoteFlag || wt === 'remote' || /\bremote\b/i.test(L);
   const isHybrid = wt === 'hybrid' || /\bhybrid\b/i.test(L);
 
-  // Hybrid only in Texas (per this goal: "remote, hybrid in Texas").
-  if (isHybrid && TEXAS.test(L) && !FOREIGN.test(L)) return true;
+  // Hybrid only counts if it's in your own metro (null HYBRID_LOCAL → skip all hybrid).
+  if (isHybrid && HYBRID_LOCAL && HYBRID_LOCAL.test(L) && !FOREIGN.test(L)) return true;
   if (isRemote) {
     if (US_STRONG.test(L) && !FOREIGN.test(L)) return true;   // remote + explicit US (no foreign tag)
     if (REMOTE_BARE.test(L) || !L) return true;               // just "Remote"/"US-Remote" → assume US
@@ -118,7 +137,7 @@ async function main() {
       if (!persona.matchKeywords.test(j.title)) continue;            // role fit
       if (HW_RE.test(j.title)) continue;                             // skip hardware/manufacturing "test technician" roles (remove if you target hardware)
       if (GOV_TITLE.test(j.title)) continue;                          // skip federal/government/clearance roles
-      if (!locationEligible(j.location, j.remote, j.workplaceType)) continue; // remote-US or hybrid-TX only
+      if (!locationEligible(j.location, j.remote, j.workplaceType)) continue; // remote-US or hybrid-local only
       const url = (j.url || '').split('?')[0].split('#')[0];
       if (!url || seen.has(url) || known.has(url)) continue;         // dedupe
       known.add(url);
