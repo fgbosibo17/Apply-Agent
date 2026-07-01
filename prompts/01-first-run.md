@@ -23,7 +23,7 @@ with the fill→review pipeline so every application is checked before it's subm
 > thing stays under the limit. If you need more detail, put it in your resume or in
 > `src/personas.js` instead of the goal.
 
-## 📋 Paste this into Claude Code (edit the blanks first)
+## 📋 Paste this into Claude Code (edit the blanks first) - retype /goal so it is in blue and claude recognises it as a command
 
 ```
 /goal I added my resume(s) to the Resume/ folder. Read them, extract ALL my
