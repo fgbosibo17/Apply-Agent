@@ -38,3 +38,8 @@ Both prompts enforce the same rules — change the wording to fit you, but keep 
 Everything is a template. Edit `src/personas.js` and the `CLAUDE.md` profile directly, or
 just change the `<< ... >>` fields in the prompt. You can also write your own `/goal`
 prompts — the two here are a starting point, not a limit.
+
+> **Keep `/goal` under ~4000 characters.** Claude Code caps the `/goal` command at about
+> 4000 chars. The first-run block is ~2,200 and the subsequent-runs block is ~1,400, so
+> you have room — but keep fill-ins short. Anything longer (extra detail, notes) belongs in
+> your resume or `src/personas.js`, not the goal.

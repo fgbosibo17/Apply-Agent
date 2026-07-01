@@ -15,6 +15,9 @@ remote jobs and applies to them, with the same review-before-submit guardrails.
 
 ---
 
+> ℹ️ Claude Code's `/goal` accepts up to ~4000 characters. This block is ~1,400, so
+> you have plenty of room to tweak it.
+
 ## 📋 Paste this into Claude Code
 
 ```

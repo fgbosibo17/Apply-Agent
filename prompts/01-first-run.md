@@ -18,6 +18,11 @@ with the fill→review pipeline so every application is checked before it's subm
 
 ---
 
+> ℹ️ Claude Code's `/goal` accepts up to ~4000 characters. This block is ~2,200,
+> so you have room — but keep your fill-ins concise (a few words each) so the whole
+> thing stays under the limit. If you need more detail, put it in your resume or in
+> `src/personas.js` instead of the goal.
+
 ## 📋 Paste this into Claude Code (edit the blanks first)
 
 ```
