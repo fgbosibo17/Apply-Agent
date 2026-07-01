@@ -8,6 +8,37 @@ It's built to be driven by **[Claude Code](https://claude.com/claude-code)** (ta
 
 ---
 
+## Two agents: one fills, one reviews (accuracy pass)
+
+Keyword heuristics alone can still get *custom screening questions* wrong — claiming a
+certification/degree/skill you don't have, putting a country where a city belongs, and so on.
+To catch that, there's an optional **multi-agent fill → review pipeline** (`workflows/fill-review-applications.js`,
+run via Claude Code's `Workflow` tool):
+
+1. **Fill agent** — fetches a job's *real* questions (`node src/dump-questions.js <url>`, Greenhouse's public
+   question API) and drafts an answer for each from your resume facts.
+2. **Review agent** — an *independent* agent audits every answer against your resume, corrects overclaims,
+   and **rejects jobs that require a credential/license/language you don't have**.
+3. The vetted answers are written to `data/verified-answers.json`, which the ATS handlers read **first**
+   (`src/util/verified.js`) — so the real submission uses reviewed answers, not guesses.
+   `src/apply-verified.js` merges them and builds an approved-only queue.
+
+Your resume facts are passed to the pipeline at run time and are **never stored in the repo** — no PII is committed.
+
+## Honesty is derived from your profile — nothing hardcoded
+
+Every demographic, education, and experience answer is computed from your persona (`src/personas.js`), so the
+agent stays truthful for **any** background:
+
+- **Gender / race / pronouns** are matched from your own values — no hardcoded defaults.
+- **Education** is answered by *rank*: it never claims a credential above your highest degree, and picks your real
+  level from a dropdown (or leaves it blank) rather than inventing a degree. "Do you have a Bachelor's?" → honest Yes/No.
+- **Years of experience** for a *specific* tool returns your real total only if that skill is on your resume
+  (set `skills` in your persona) — otherwise **0**, never an invented number.
+- **School** fields fill your real school or stay blank — never a random autocomplete match.
+- **Cover letters** are only attached when a form strictly *requires* one.
+- **Referrals / "do you know anyone here?"** → answered "No" (unless your facts say otherwise), never fabricated.
+
 ## What makes the applications *good* (quality, not just quantity)
 
 This isn't a blind form-filler. The pieces that get real responses:

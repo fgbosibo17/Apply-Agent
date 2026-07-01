@@ -9,8 +9,9 @@ const { fetchJson } = require('../ats-apis');
 const { fillLocation } = require('../util/location');
 const { handleCaptcha } = require('../util/captcha');
 const { fillRemainingRequired, proofread, handleRadioGroups } = require('../util/form');
-const { optionForLabel, textValueForLabel } = require('../util/answers-map');
+const { optionForLabel, textValueForLabel, yearsOfExperienceFor, genderOptionRe, raceOptionRe, pronounOptionRe, degreeRank } = require('../util/answers-map');
 const { getLearned, saveLearned } = require('../util/learned');
+const { getVerified, getVerifiedOption } = require('../util/verified');
 
 // Parse the board token + numeric job id out of any Greenhouse URL form
 // (boards. / job-boards. / embed). Returns null if it doesn't look like one.
@@ -44,7 +45,7 @@ function coverLetterText(jobMeta) {
   const role = (jobMeta && jobMeta.role) || 'this role';
   const pitch = a.whyThisRoleBlurb || a.elevatorPitch || '';
   return `Dear Hiring Team,\n\nI'm excited to apply for the ${role} role at ${company}. ${pitch}\n\n`
-    + `With ${a.totalYearsExperience}+ years across cloud support, DevOps, and customer-facing technical work, I bring hands-on depth in AWS and Azure, CI/CD, identity/access, and incident response, plus a track record of resolving complex issues end-to-end and keeping customers and production systems running smoothly. I'd welcome the chance to bring that same ownership to ${company}.\n\n`
+    + `I'd welcome the opportunity to bring my ${a.totalYearsExperience}+ years of experience and commitment to accuracy and quality to ${company}.\n\n`
     + `Thank you for your consideration.\n\nBest regards,\n${a.fullName}`;
 }
 
@@ -69,7 +70,7 @@ function valueForLabel(label) {
   if (/salary|compensation|expected pay|desired pay/.test(l) && !/current salary|salary history|last salary|present salary|previous salary/.test(l)) return a.salaryRangeString;
   if (/notice period/.test(l)) return a.noticePeriod;
   if (/start date|when.*(start|available)|availability|earliest.*(start|available)/.test(l)) return a.earliestStartDate;
-  if (/how many years|years of experience|years.*experience/.test(l)) return String(a.totalYearsExperience);
+  if (/how many years|years of experience|years.*experience/.test(l)) return yearsOfExperienceFor(label, a);
   if (/current (company|employer)|company name|employer name|organization|current organization/.test(l)) return a.currentEmployer;
   if (/current (title|role)|job title|your title/.test(l)) return a.currentTitle;
   if (/language/.test(l)) return 'English';
@@ -78,7 +79,7 @@ function valueForLabel(label) {
   if (/zip|postal/.test(l)) return a.zip || '77002';
   if (/^country|country of (residence|citizenship)|your country|which country|^land\s*\*?\s*$/.test(l)) return a.country;
   if (/full name|legal name/.test(l)) return a.fullName;
-  if (/pronoun/.test(l)) return a.pronouns || 'He/Him';
+  if (/pronoun/.test(l)) return a.pronouns || '';
   if (/^address|street address|address line/.test(l)) return a.addressLine1 ? `${a.addressLine1}, ${a.fullAddress}` : a.fullAddress;
   if (/address/.test(l) && !/email|e-mail|web|url|ip address/.test(l)) return a.fullAddress;
   // Attestation "type the words X" fields (anti-AI-in-interview acknowledgements, etc.).
@@ -101,11 +102,15 @@ function chooseOption(label, options) {
   const find = (re) => options.find((o) => re.test(o));
   const yes = () => find(/^yes\b/i);
   const no = () => find(/^no\b/i);
+  // Gender / pronoun / race matchers derived from the persona (never hardcoded).
+  const genderOpt = () => { const re = genderOptionRe(a); return (re && find(re)) || find(/prefer not|decline|do(n'?t| not) wish/i); };
+  const pronounOpt = () => { const re = pronounOptionRe(a); return (re && find(re)) || find(/prefer not/i); };
+  const raceOpt = () => { const re = raceOptionRe(a); return (re && find(re)) || find(/prefer not|decline|do(n'?t| not) wish/i); };
   // ALWAYS-NO honesty questions (must never get the affirmative default): the
   // applicant is NOT a government official / politically exposed person, etc.
   if (/government official|public official|politically exposed|\bpep\b|senior (foreign )?(political|government)|hold(s|ing)? (public )?office|elected official|head of state|are you (a |an )?(government|public) (employee|official)|immediate family.*(government|political|official|public office)|family member.*(government|political|public official)|conflict of interest|felony|convicted|criminal (record|history|conviction)/.test(L)) return no();
-  // Referral questions → No (we were not referred by a current employee).
-  if (/were you referred|referred by (an? )?(employee|someone|current|anyone)|employee referral|did (anyone|someone|a current).*(refer|recruit) you|do you (have|know).*referr/.test(L)) return no();
+  // Referral / relationship questions → No (not referred; no relatives/friends here).
+  if (/were you referred|referred by (an? )?(employee|someone|current|anyone)|employee referral|did (anyone|someone|a current).*(refer|recruit) you|do you (have|know).*referr|relat(ed|ionship).*(employee|someone|anyone|staff|family|friend|works? (here|at|for))|do you know (anyone|someone)|know (anyone|someone).*work|family.*(work|employ)|friend.*(work|employ)|connection (to|at|with)|acquaint/.test(L)) return no();
   // "Prepared/submitted by AI?" → No (per user instruction).
   if (/(prepared|submitted|completed|written|generated|created)\b.{0,70}\b(by|with|using|via)\b.{0,25}(ai\b|a\.i\.|gpt|llm|language model|automat|bot|chatgpt|machine)|in whole or in part by an? (ai|automat|language model)|use[ds]?\b.{0,15}(ai|chatgpt|gpt|an ai|a language model|llm).{0,40}(prepar|complet|fill|writ|generat|appl)|\bai[- ]?(generated|prepared|assisted|written|completed)\b/.test(L)) return no();
   // Start-date dropdowns (month/day/year) → a date ~3 weeks out.
@@ -116,7 +121,7 @@ function chooseOption(label, options) {
     if (/day/.test(L)) return find(new RegExp('^0?' + d.getDate() + '$'));
     if (/year/.test(L)) return find(new RegExp('^' + d.getFullYear() + '$')) || find(new RegExp('^' + (d.getFullYear() + 1) + '$'));
   }
-  if (/pronoun/.test(L)) return find(/he\s*\/\s*him/i) || find(/prefer not/i);
+  if (/pronoun/.test(L)) return pronounOpt() || find(/prefer not/i);
   if (/sponsor/.test(L)) return no();                                         // needs sponsorship? No
   if (/entitled.*work.*canada|authoriz.*canada|work.*in canada/.test(L)) return no();
   if (/authoriz.*work|legally.*(authorized|entitled).*work|work.*authoriz|eligible to work/.test(L)) return yes();
@@ -141,9 +146,9 @@ function chooseOption(label, options) {
   }
   if (/currently.*employ.*(here|at|with)/.test(L)) return find(/have not|no,? i|never/i) || no();
   if (/transgender/.test(L)) return find(/^no\b/i) || find(/prefer not|decline|do(n'?t| not) wish/i);
-  if (/gender|how do you identify/.test(L)) return find(/^male$|^man$/i) || find(/\bmale\b/i);
-  if (/hispanic|latino/.test(L)) return find(/not hispanic|^no\b/i);
-  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return find(/black or african/i) || find(/^black$/i) || find(/\bblack\b/i);
+  if (/gender|how do you identify/.test(L)) return genderOpt();
+  if (/hispanic|latino/.test(L)) return (/yes/i.test(a.hispanicLatino || '') ? find(/^yes|hispanic or latino/i) : null) || find(/not hispanic|^no\b/i);
+  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return raceOpt();
   if (/veteran/.test(L)) return find(/not a (protected )?veteran|i am not|^no\b/i) || no();
   if (/disab/.test(L)) return find(/no,? i (don|do not)|do not have a disab|^no\b/i) || find(/no/i);
   if (/relocat/.test(L)) return no();
@@ -152,10 +157,30 @@ function chooseOption(label, options) {
   // and the skills asked about are on the resume.
   if (/linkedin profile|do you have.*linkedin/.test(L)) return yes();
   if (/join.*office|in.?office|on-?site|in.?person|come (in|into)|days?\/?\s*week|hybrid|commute/.test(L)) return yes();
-  if (/degree|bachelor|master|education|graduat/.test(L)) return yes();
+  // Education gate questions — answer by RANK vs the persona's highest degree, so
+  // we never claim a credential above what they hold. "or equivalent experience"
+  // phrasing → Yes (experience counts).
+  if (/bachelor|master|college degree|university degree|4[- ]year degree|associate degree|advanced degree|graduate degree/.test(L)) {
+    if (/or equivalent|equivalent (experience|work)|or.*experience|preferred|nice to have/.test(L)) return yes();
+    return (degreeRank(L) <= degreeRank(a.highestDegree)) ? yes() : (no() || find(/prefer not|decline/i));
+  }
+  if (/high school|\bged\b|diploma|secondary (school|education)/.test(L)) return (degreeRank(a.highestDegree) >= 1) ? yes() : (no() || find(/prefer not|decline/i));
+  if (/do you meet|meet (the|all|each|minimum|our).*(education|requirement)|education requirement/.test(L)) return yes();
+  if (/\bdegree\b|graduat|college|university/.test(L)) return (degreeRank(a.highestDegree) >= 4) ? yes() : (no() || find(/prefer not|decline/i));
   if (/physically located|located in (the )?(us|u\.s\.|united states)|reside (in|within) (the )?(us|u\.s|united states)|permanently reside|based in (the )?(us|united states)|live in (the )?(us|united states|us or canada|united states or canada)|live\/work in (the )?(us|united states)|us or canada|authorized.*(work|employment).*(us|united states)/.test(L)) return yes();
-  if (/highest (level of )?(education|degree)|degree.*(complete|earned|hold)|education level/.test(L)) return find(new RegExp(a.highestDegree.replace(/[^a-z]/ig, '.?'), 'i')) || find(/master/i) || find(/bachelor/i);
-  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) return find(/computer science|software engineering|computer engineering|information (technology|systems)|^engineering|comp(uter)? sci|information science/i) || find(/business|management/i) || find(/other|not listed|none of/i);
+  if (/highest (level of )?(education|degree)|degree.*(complete|earned|hold)|education level/.test(L)) {
+    const pr = degreeRank(a.highestDegree);
+    const exact = /^</.test(a.highestDegree || '') ? null : find(new RegExp((a.highestDegree || 'x').replace(/[^a-z]/ig, '.?'), 'i'));
+    if (exact) return exact;
+    let chosen = null, cr = -1;
+    for (const o of options) { const r = degreeRank(o); if (r > 0 && r <= pr && r > cr) { chosen = o; cr = r; } }
+    return chosen || find(/^\s*(none|no degree|no formal|not applicable|n\/?a)\b/i) || find(/prefer not|decline|other/i);
+  }
+  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) {
+    const f = a.highestDegreeField || '';
+    const m = /^</.test(f) ? null : find(new RegExp(f.replace(/[^a-z]/ig, '.?'), 'i'));
+    return m || find(/other|not listed|none of|n\/a|general studies|liberal arts/i);
+  }
   if (/privacy|data processing|gdpr|ccpa|consent|acknowledge|i agree|terms/.test(L)) return yes() || find(/agree|accept|acknowledge|i have read|consent/i);
   if (/do you meet|meet (each|all).*(qualification|requirement)|meet the (basic |minimum )?(qualification|requirement)|read the (job|role)/.test(L)) return yes();
   if (/(do you have|have you|are you).*(experience|years|proficien|familiar|worked|written|maintain|built|develop|deploy|manage|use|use[dn]|implement|configur|design)|at least \d+\s*year|\d+\+?\s*years|minimum.*year|comfortable (with|working)/.test(L)) return yes();
@@ -271,28 +296,48 @@ async function fillEmptyComboboxes(page, form) {
     // until typed), so handle it here before the generic open-and-read path.
     if (/\bschool\b|\buniversity\b|\bcollege\b|institution|alma mater/.test(L) && !/high school|highest (level|degree)|business school|hear about|which school.*hear/.test(L)) {
       const okSchool = await (async () => {
-        const full = a.highestDegreeSchool || 'University';
-        // Greenhouse's school list rarely has the FULL "...Graduate School of
-        // Business" suffix — query the core name (up to University/College/etc.)
-        // so the autocomplete returns matches.
-        const m = full.match(/^(.*?(?:University|College|Institute|Polytechnic|Academy))\b/i);
-        const query = (m ? m[1] : full.split(/[ ,]/).slice(0, 2).join(' ')).slice(0, 30);
-        const commitText = () => form.evaluate((id) => { const el = document.getElementById(id); const c = el && el.closest('[class*="select__control"]'); const t = c ? (c.innerText || '').replace(/\s+/g, ' ').trim() : ''; return !!(c && (c.querySelector('[class*="single-value"]') || (t && !/^select|^choose/i.test(t) && t.length < 80))); }, d.id).catch(() => false);
+        const full = a.highestDegreeSchool || '';
+        if (!full) return false; // no school on file → leave blank, never guess
+        const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const target = norm(full);
         for (let attempt = 0; attempt < 2; attempt++) {
           await page.keyboard.press('Escape').catch(() => {});
           await cb.scrollIntoViewIfNeeded().catch(() => {});
           await cb.click().catch(() => {});
           await cb.fill('').catch(() => {});
-          await cb.type(query, { delay: 60 }).catch(() => {}); // keystrokes trigger the search
+          await cb.type(full.slice(0, 40), { delay: 50 }).catch(() => {}); // type her REAL school name
           await page.waitForTimeout(1500); // let the autocomplete query return
-          let done = false;
-          try { await form.getByRole('option').first().click({ timeout: 2500 }); done = true; } catch {}
-          if (!done) { await page.keyboard.press('Enter').catch(() => {}); await page.waitForTimeout(300); }
-          if (await commitText()) return true;
+          // Read the visible options and click ONLY one that genuinely matches her
+          // school — NEVER the random first result (that fills a rubbish school).
+          const opts = await form.evaluate(() =>
+            Array.from(document.querySelectorAll('[role="option"], [class*="select__option"]'))
+              .filter((e) => e.offsetParent !== null).map((e) => e.textContent.trim())
+          ).catch(() => []);
+          const match = opts.find((o) => {
+            const n = norm(o);
+            return n.length >= 6 && (target.includes(n) || n.includes(target));
+          });
+          const committed = () => form.evaluate((id) => { const el = document.getElementById(id); const c = el && el.closest('[class*="select__control"]'); return !!(c && c.querySelector('[class*="single-value"]')); }, d.id).catch(() => false);
+          if (match) {
+            try { await form.getByRole('option', { name: match, exact: false }).first().click({ timeout: 2000 }); } catch {}
+            if (await committed()) return true;
+          }
+          // Her exact school isn't in the list. Try an "Other/Not listed" option, then
+          // accept the typed free text (creatable selects) — her REAL school name, never
+          // a wrong one. Only leave blank if none of that commits.
+          const other = opts.find((o) => /^\s*(other|not listed|none of the above|prefer not)\b/i.test(o));
+          if (other) {
+            try { await form.getByRole('option', { name: other, exact: false }).first().click({ timeout: 2000 }); } catch {}
+            if (await committed()) return true;
+          }
+          await page.keyboard.press('Enter').catch(() => {}); // accept typed value if creatable
+          await page.waitForTimeout(300);
+          if (await committed()) return true;
+          await page.keyboard.press('Escape').catch(() => {});
         }
-        return commitText();
+        return false;
       })();
-      if (process.env.DBG_SELECT) console.log(`   [school] "${d.label.slice(0, 40)}" -> committed=${okSchool}`);
+      if (process.env.DBG_SELECT) console.log(`   [school] "${d.label.slice(0, 40)}" -> matched=${okSchool}`);
       continue;
     }
     // already filled by an earlier pass since we read descs? re-check fresh (lenient).
@@ -337,7 +382,10 @@ async function fillEmptyComboboxes(page, form) {
       pick = chooseOption(d.label, opts) || optionForLabel(d.label, opts, a);
       const sensitive = /gender|race|ethnic|veteran|disab|hispanic|sexual|government|politically|\bpep\b|conflict|felony|criminal/.test(L);
       if (!pick && !sensitive) {
-        pick = opts.find((o) => /^\s*yes\b/i.test(o)) || opts.find((o) => !/^\s*$|select|choose|prefer not|decline|none|n\/a|^\s*no\b/i.test(o));
+        // Prefer Yes/attestation, then a MODEST skill level — never Expert/Advanced/Fluent.
+        pick = opts.find((o) => /^\s*yes\b|^i (have|am|agree|understand)|acknowledge/i.test(o)) ||
+               opts.find((o) => /intermediate|proficient|comfortable|working knowledge|familiar/i.test(o)) ||
+               opts.find((o) => !/^\s*$|select|choose|prefer not|decline|none|n\/a|^\s*no\b|expert|advanced|fluent|native|master|\d{2,}\s*\+/i.test(o));
       }
       // EEO with no exact match → prefer an explicit decline rather than leaving blank.
       if (!pick && sensitive) pick = opts.find((o) => /prefer not|decline|do(n'?t| not) wish|not to (answer|say|disclose)|won'?t answer/i.test(o));
@@ -455,12 +503,14 @@ async function fillFromSchema(page, form, schema) {
   for (const q of schema.questions) {
     for (const f of q.fields || []) {
       if (f.type === 'input_text' || f.type === 'textarea') {
+        // Never fill an OPTIONAL cover letter — only add one when required.
+        if (/cover letter/i.test(q.label) && !q.required) continue;
         const el = await form.$(byName(f.name));
         if (!el || !(await el.isVisible().catch(() => false))) continue;
         if (await el.inputValue().catch(() => '')) continue;
-        // greenhouse map → the FULLER shared text map (covers legal first/last
-        // name, degree, employer, school, etc. that valueForLabel omits) → learned.
-        let val = valueForLabel(q.label) || textValueForLabel(q.label, a) || getLearned(q.label);
+        // VERIFIED (reviewed) answer wins over every heuristic; then greenhouse
+        // map → shared text map → learned.
+        let val = getVerified(q.label) || valueForLabel(q.label) || textValueForLabel(q.label, a) || getLearned(q.label);
         if (!val && q.required) {                                   // NEW question → think + save
           val = /\?|why|describe|tell us|explain|how |what |cover letter|additional|experience|background|relevant|in your own words|elaborate|provide (details|examples)|walk us through|share (an|your|some)/i.test(q.label) ? generateAnswer(q.label, a) : 'N/A';
           saveLearned(q.label, val);
@@ -469,13 +519,17 @@ async function fillFromSchema(page, form, schema) {
       } else if (f.type === 'multi_value_single_select') {
         const opts = (f.values || []).map((v) => String(v.label));
         if (!opts.length) continue;
-        let pick = chooseOption(q.label, opts);
+        let pick = getVerifiedOption(q.label, opts) || chooseOption(q.label, opts);
         // Affirmative fallback for an unknown REQUIRED select so it doesn't block
         // submit. Skip for demographic/country/state (handled above) to avoid a
         // wrong sensitive pick.
         if (!pick && q.required && !/gender|race|ethnic|veteran|disab|country|state|province|hispanic|sexual|government|public official|politically|\bpep\b|conflict of interest|felony|convicted|criminal|public office|elected|referr|refer you|transgender/i.test(q.label)) {
-          pick = opts.find((o) => /^yes\b|regularly|proficient|advanced|expert|extensive|fluent|\d\s*\+|agree|i (have|am)/i.test(o)) ||
-                 opts.find((o) => !/select|choose|prefer not|decline|none|n\/a|^no\b/i.test(o));
+          // Unknown required select → pick an affirmative/attestation option, but a
+          // MODEST skill level (never Expert/Advanced/Fluent — that overclaims).
+          pick = opts.find((o) => /^yes\b|^i (have|am|agree|understand)|^agree|acknowledge/i.test(o)) ||
+                 opts.find((o) => /intermediate|proficient|comfortable|working knowledge|some experience|familiar/i.test(o)) ||
+                 opts.find((o) => /beginner|basic|novice|learning/i.test(o)) ||
+                 opts.find((o) => !/select|choose|prefer not|decline|none|n\/a|^no\b|expert|advanced|fluent|native|master|\d{2,}\s*\+/i.test(o));
         }
         if (process.env.DBG_SELECT) console.log(`   [schema-select] "${q.label}" opts=[${opts.join('|')}] pick="${pick}"`);
         const ok = await fillSelect(page, form, f.name, pick);
@@ -537,12 +591,16 @@ async function applyGreenhouse(page, jobMeta) {
   if (/\bIndia\b|\bMumbai\b|\bBangalore\b|\bBengaluru\b|\bPune\b|\bHyderabad\b|\bChennai\b|\bDelhi\b|\bGurgaon\b|\bNoida\b|\bIND\b|\bArgentina\b|\bMexico\b|\bColombia\b|\bBrazil\b|\bPeru\b|\bChile\b|\bUruguay\b|\bLATAM\b|\bSouth Africa\b|\bLithuania\b|\bUkraine\b|\bPhilippines\b|\bVilnius\b|\bBerlin\b|\bGermany\b|\bLondon\b|\bUK\b|\bUnited Kingdom\b|\bEMEA\b|\bAPAC\b/i.test(locationHeader)) {
     return { status: 'Skipped', reason: `Non-US location: "${locationHeader.slice(0, 80)}"` };
   }
-  // Scan the WHOLE posting (not just the header) for citizenship/clearance/export-
-  // control requirements — these are often in a question lower in the form, and
-  // the persona (green-card holder) can't satisfy them. Skip before filling.
+  // Scan the WHOLE posting for requirements the persona can't satisfy. Always skip
+  // active-clearance/ITAR roles; skip citizenship-required roles only when the
+  // persona is NOT a US citizen (a.usCitizen !== 'Yes').
   const fullText = await page.evaluate(() => document.body.innerText).catch(() => '');
-  if (/security clearance|government[- ]?issued clearance|clearance\s*(level|eligib|is required|required|to obtain|to maintain)|(active|obtain|maintain|hold an?)\s+\w*\s*clearance|\bTS\/SCI\b|\bpolygraph\b|export control|\bITAR\b|active\s+(secret|top secret)|requires?\s+(u\.?s\.?\s+)?citizenship|u\.?s\.?\s+citizen(?:ship)?\s+(is\s+)?(required|only|req)|must be (a |an )?(u\.?s\.?|united states)\s+(citizen|person|national)|citizenship\s+(is\s+)?required|u\.?s\.?\s+citizens\s+only/i.test(fullText)) {
-    return { status: 'Skipped', reason: 'Requires US citizenship / clearance / export-control eligibility' };
+  const needsClearance = /security clearance|government[- ]?issued clearance|clearance\s*(level|eligib|is required|required|to obtain|to maintain)|(active|obtain|maintain|hold an?)\s+\w*\s*clearance|\bTS\/SCI\b|\bpolygraph\b|export control|\bITAR\b|active\s+(secret|top secret)/i.test(fullText);
+  if (needsClearance) {
+    return { status: 'Skipped', reason: 'Requires active security clearance / export-control eligibility' };
+  }
+  if (String(a.usCitizen).toLowerCase() !== 'yes' && /(must be|requires?)\s+(a\s+)?(u\.?s\.?|united states)\s+citizen|u\.?s\.?\s+citizenship\s+(is\s+)?required|citizenship\s+required/i.test(fullText)) {
+    return { status: 'Skipped', reason: 'Requires US citizenship (persona is not a US citizen)' };
   }
   // "Prepared by AI?" question — per explicit user instruction, answer No and
   // proceed (handled in chooseOption / valueForLabel), rather than skipping.
@@ -631,9 +689,13 @@ async function applyGreenhouse(page, jobMeta) {
   // "Enter manually"/"Paste" toggle, and a file-input cover letter has no visible
   // label. Detect both (textarea, file input #cover_letter), then fill/upload a
   // tailored letter.
-  const coverTextarea0 = await form.$('textarea[name*="cover_letter" i], textarea[id*="cover_letter" i], textarea[aria-label*="cover letter" i]').catch(() => null);
-  const coverFileInput = await form.$('input[type="file"]#cover_letter, input[type="file"][name*="cover" i], input[type="file"][id*="cover" i]').catch(() => null);
-  if (coverTextarea0 || coverFileInput || requiredLabels.some((l) => /cover letter/i.test(l))) {
+  // Only attach a cover letter when the form REQUIRES one (asterisk on the label).
+  // Optional / "recommended" cover letters are intentionally left blank per the
+  // applicant's instruction — do not submit unsolicited cover letters.
+  const coverRequired = requiredLabels.some((l) => /cover letter/i.test(l));
+  const coverTextarea0 = coverRequired ? await form.$('textarea[name*="cover_letter" i], textarea[id*="cover_letter" i], textarea[aria-label*="cover letter" i]').catch(() => null) : null;
+  const coverFileInput = coverRequired ? await form.$('input[type="file"]#cover_letter, input[type="file"][name*="cover" i], input[type="file"][id*="cover" i]').catch(() => null) : null;
+  if (coverRequired) {
     const clText = coverLetterText(jobMeta);
     // Reveal a hidden paste box if there's a toggle near "cover letter".
     for (const t of ['Enter manually', 'Paste', 'Write', 'Type', 'Manually']) {
@@ -718,7 +780,7 @@ async function applyGreenhouse(page, jobMeta) {
     if (!/\?/.test(label)) continue;
     if (/linkedin|github|website|portfolio|name|email|phone/i.test(label)) continue;
     if (/salary|compensation|expected pay/i.test(label)) { await inp.fill(a.salaryRangeString).catch(() => {}); continue; }
-    if (/how many years|years of/i.test(label)) { await inp.fill(String(a.totalYearsExperience)).catch(() => {}); continue; }
+    if (/how many years|years of/i.test(label)) { await inp.fill(yearsOfExperienceFor(label, a)).catch(() => {}); continue; }
     const ans = generateAnswer(label, a);
     if (ans) await inp.fill(ans.slice(0, 300)).catch(() => {});
   }
@@ -729,11 +791,14 @@ async function applyGreenhouse(page, jobMeta) {
   // "how did you hear"/previously-employed selects the heuristics above miss.
   const { unfilledRequired } = await fillFromSchema(page, form, schema);
 
-  // EEO react-select dropdowns (required → block submit if unfilled).
+  // EEO react-select dropdowns (required → block submit if unfilled). Gender/race
+  // picks derive from the persona; decline gracefully when unset.
+  const genderRe = genderOptionRe(a) || /prefer not|decline/i;
+  const raceRe = raceOptionRe(a) || /prefer not|decline/i;
   const eeoTargets = [
-    { match: /gender/i, pick: /^male$/i },
-    { match: /are you hispanic|hispanic\/latino|hispanic or latino/i, pick: /^no$|not hispanic/i },
-    { match: /\brace\b|ethnicity/i, pick: /black or african american/i },
+    { match: /gender/i, pick: genderRe },
+    { match: /are you hispanic|hispanic\/latino|hispanic or latino/i, pick: /yes/i.test(a.hispanicLatino || '') ? /^yes$|hispanic or latino/i : /^no$|not hispanic/i },
+    { match: /\brace\b|ethnicity/i, pick: raceRe },
     { match: /veteran/i, pick: /not a (protected )?veteran|i am not/i },
     { match: /disab/i, pick: /no, i (don.t|do not)|i (don.t|do not) have a disability|^no\b/i },
   ];
@@ -761,9 +826,9 @@ async function applyGreenhouse(page, jobMeta) {
     const cur = await sel.evaluate(el => el.value).catch(() => '');
     if (cur && !/^$|select|choose/i.test(cur)) continue;
     const pick = async (re) => { const opts = await sel.$$eval('option', os => os.map(o => o.textContent.trim())); const m = opts.find(o => re.test(o)); if (m) await sel.selectOption({ label: m }).catch(() => {}); };
-    if (/gender/i.test(label)) await pick(/^male$/i);
-    else if (/hispanic/i.test(label)) await pick(/^no|not hispanic/i);
-    else if (/\brace\b|ethnicity/i.test(label)) await pick(/black or african american/i);
+    if (/gender/i.test(label)) await pick(genderOptionRe(a) || /prefer not|decline/i);
+    else if (/hispanic/i.test(label)) await pick(/yes/i.test(a.hispanicLatino || '') ? /^yes|hispanic or latino/i : /^no|not hispanic/i);
+    else if (/\brace\b|ethnicity/i.test(label)) await pick(raceOptionRe(a) || /prefer not|decline/i);
     else if (/veteran/i.test(label)) await pick(/not a (protected )?veteran|i am not/i);
     else if (/disab/i.test(label)) await pick(/no,? i (don.t|do not)|^no\b/i);
   }

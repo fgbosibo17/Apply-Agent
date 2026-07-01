@@ -154,6 +154,11 @@ const personas = {
     // Regex: a discovered job TITLE matching this routes to this persona.
     // Replace with YOUR target titles (pipe-separated). \b = word boundary.
     matchKeywords: /<Your Title>|<Synonym>|<Another Title>/i,
+    // OPTIONAL — a pipe-separated string of the skills actually on your resume.
+    // Used to answer "how many years of X" and "experience with X" HONESTLY:
+    // a skill listed here → your real total years; a skill NOT listed → 0 (never
+    // claims experience you don't have). Leave '' to fall back to matchKeywords.
+    skills: '',
   },
 
   // EXAMPLE persona #2 — an ADJACENT track sharing identity A (different resume

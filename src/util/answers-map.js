@@ -10,6 +10,77 @@
 
 const { generateAnswer } = require('../answer-bank');
 
+// ── Persona-derived matchers (nothing hardcoded — everything reads the active
+//    persona `a`, so this code is generic for any applicant). ────────────────
+
+// The applicant's real skills, used to answer "how many years of X" honestly.
+// Source order: an explicit `a.skills` (RegExp or "a|b|c" string) → the persona's
+// job-match regex → null (ungated). Fill `skills` in personas.js for best results.
+function skillsRe(a) {
+  if (a.skills instanceof RegExp) return a.skills;
+  if (typeof a.skills === 'string' && a.skills.trim()) { try { return new RegExp(a.skills, 'i'); } catch { /* ignore */ } }
+  if (a.matchKeywords instanceof RegExp) return a.matchKeywords;
+  return null;
+}
+
+// Build option-matcher regexes from the persona's OWN gender/race/pronouns
+// values (returns null when unset/placeholder so the caller declines gracefully).
+function genderOptionRe(a) {
+  const g = (a.gender || '').toLowerCase();
+  if (/female|woman/.test(g)) return /^\s*female\b|^\s*woman\b/i;
+  if (/non.?binary/.test(g)) return /non.?binary/i;
+  if (/^\s*male|\bman\b/.test(g)) return /^\s*male\b|^\s*man\b/i;
+  return null;
+}
+function raceOptionRe(a) {
+  const r = (a.race || a.ethnicity || '').toLowerCase();
+  if (/black|african/.test(r)) return /black or african|^\s*black\b/i;
+  if (/white|caucasian/.test(r)) return /^\s*white\b|caucasian/i;
+  if (/asian/.test(r)) return /^\s*asian\b/i;
+  if (/hispanic|latino/.test(r)) return /hispanic|latino/i;
+  if (/two or more|multi/.test(r)) return /two or more|multiracial/i;
+  if (/native|indigenous|american indian|alaska/.test(r)) return /native|american indian|indigenous|alaska/i;
+  if (/pacific|hawaiian/.test(r)) return /pacific|hawaiian/i;
+  return null;
+}
+function pronounOptionRe(a) {
+  const p = (a.pronouns || '').toLowerCase();
+  if (/she/.test(p)) return /she\s*\/\s*her/i;
+  if (/they/.test(p)) return /they\s*\/\s*them/i;
+  if (/he/.test(p)) return /he\s*\/\s*him/i;
+  return null;
+}
+
+// Rank an education level so we can answer degree questions honestly (never claim
+// a credential ABOVE the persona's highest). 0 = none/unknown.
+function degreeRank(s) {
+  const t = (s || '').toLowerCase();
+  if (/doctor|ph\.?d|d\.phil|\bmd\b|\bjd\b|doctoral/.test(t)) return 6;
+  if (/master|m\.s|m\.a|\bmba\b|graduate degree|post.?grad/.test(t)) return 5;
+  if (/bachelor|b\.s|b\.a|undergrad|4.?year degree/.test(t)) return 4;
+  if (/associate|a\.a\b|a\.s\b|2.?year degree/.test(t)) return 3;
+  if (/some college|college coursework/.test(t)) return 2;
+  if (/high school|hs diploma|secondary (school|education)|\bged\b|diploma/.test(t)) return 1;
+  return 0;
+}
+const isReal = (v) => v && !/^<|fill_me_in|your (university|field)/i.test(String(v).trim());
+
+// Honest "how many years of X" number. General experience or a genuine resume
+// skill → the applicant's real total. A specific tool/skill NOT in their skills
+// → 0 (never claim years of something they have never done).
+function yearsOfExperienceFor(label, a) {
+  const L = (label || '').toLowerCase();
+  const total = String(a.totalYearsExperience || 5);
+  // Strip boilerplate to see if a SPECIFIC skill is being asked about.
+  const topic = L
+    .replace(/how many|at least|minimum|maximum|required?|years?|months?|of|experience|do you have|have you|do you|professional|total|overall|combined|relevant|related|applicable|similar|comparable|direct|hands.?on|prior|previous|recent|current|full.?time|part.?time|working|work|industry|field|with|in|using|as|the|a|an|your|our|this|that|these|role|position|job|for|please|enter|number|\?|:|\.|,/g, ' ')
+    .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!topic) return total;                 // general experience question → real total
+  const re = skillsRe(a);
+  if (!re || re.test(L)) return total;      // no skills defined, or a real skill → real total
+  return '0';                               // a skill they have never used → honest 0
+}
+
 // Free-text / single-line value for a labeled field.
 function textValueForLabel(label, a) {
   const l = (label || '').toLowerCase();
@@ -27,7 +98,7 @@ function textValueForLabel(label, a) {
   if (/twitter|^x (handle|profile)/.test(l)) return '';
   if (/website|portfolio|personal site|professional website|other links?/.test(l)) return a.portfolio;
   if (/desired salary|salary range|salary expectation|compensation|expected pay|desired pay|pay expectation|expectation salary|salary per annum|annual salary|expected compensation/.test(l) && !/current salary|salary history|last salary|present salary/.test(l)) return a.salaryRangeString;
-  if (/how many years|years of (professional )?experience|years.*experience/.test(l)) return String(a.totalYearsExperience);
+  if (/how many years|years of (professional )?experience|years.*experience/.test(l)) return yearsOfExperienceFor(label, a);
   if (/current (company|employer)|company name|employer name|(present|recent|previous) employer|name of.*(present|current|recent|previous).*(company|employer)|most recent (company|employer)/.test(l)) return a.currentEmployer;
   if (/current (title|role|position)|job title/.test(l)) return a.currentTitle;
   if (/highest degree|degree (earned|obtained|completed|held)|^degree\b|level of education|education level/.test(l)) return a.highestDegree;
@@ -73,7 +144,7 @@ function yesNoForLabel(label, a) {
   // "Prepared/submitted by AI?" → No (per user instruction).
   if (/(prepared|submitted|completed|written|generated|created)\b.{0,70}\b(by|with|using|via)\b.{0,25}(ai\b|a\.i\.|gpt|llm|language model|automat|bot|chatgpt|machine)|in whole or in part by an? (ai|automat|language model)|use[ds]?\b.{0,15}(ai|chatgpt|gpt|an ai|a language model|llm).{0,40}(prepar|complet|fill|writ|generat|appl)|\bai[- ]?(generated|prepared|assisted|written|completed)\b/.test(l)) return 'No';
   if (/felony|convicted|criminal (record|history|conviction)|been charged/.test(l)) return 'No';
-  if (/related to.*(employee|someone who works|current).*?|do you know (anyone|someone).*works/.test(l)) return 'No';
+  if (/relat(ed|ionship).*(employee|someone|anyone|staff|family|friend|works? (here|at|for))|do you know (anyone|someone)|know (anyone|someone).*work|family.*(work|employ)|friend.*(work|employ)|connection (to|at|with)|acquaint/.test(l)) return 'No';
   if (/sponsor/.test(l)) return 'No';
   if (/entitled.*work.*canada|authoriz.*canada|work.*in canada/.test(l)) return 'No';
   if (/authoriz.*work|legally.*(authorized|entitled).*work|work.*authoriz|eligible to work|right to work/.test(l)) return 'Yes';
@@ -86,8 +157,21 @@ function yesNoForLabel(label, a) {
   if (/background check|drug (test|screen)|consent/.test(l)) return 'Yes';
   if (/linkedin profile|do you have.*linkedin/.test(l)) return 'Yes';
   if (/based in (the )?(us|u\.s\.|united states)|located in (the )?(us|united states)|reside in (the )?(us|united states)|physically located/.test(l)) return 'Yes';
-  if (/(do you have|have you|are you|do you possess).*(experience|years|proficien|familiar|worked|skill|knowledge)|at least \d+\s*year|\d+\+?\s*years|minimum.*year/.test(l)) return 'Yes';
-  if (/degree|bachelor|master|education|graduat/.test(l)) return 'Yes';
+  // "Do you have experience with X" — Yes for general experience or a real resume
+  // skill; No if it names a specific tool/skill she has never used (never lie).
+  if (/(do you have|have you|are you|do you possess).*(experience|years|proficien|familiar|worked|skill|knowledge)|at least \d+\s*year|\d+\+?\s*years|minimum.*year/.test(l)) {
+    return yearsOfExperienceFor(l, a) === '0' ? 'No' : 'Yes';
+  }
+  // Education — answer by RANK against the persona's highest degree, so we never
+  // claim a credential above what they actually hold (and never deny one they do).
+  if (/do you meet|meet (the|all|each|minimum|our).*(education|requirement)|education requirement/.test(l)) return 'Yes';
+  {
+    const askRank = degreeRank(l);
+    if (askRank > 0 && /bachelor|master|associate|doctorate|\bphd\b|\bmba\b|degree|diploma|graduat|high school|\bged\b|college|university|education/.test(l)) {
+      return askRank <= degreeRank(a.highestDegree) ? 'Yes' : 'No';
+    }
+    if (/\bdegree\b|graduat/.test(l)) return degreeRank(a.highestDegree) >= 4 ? 'Yes' : 'No';
+  }
   if (/join.*office|in.?office|on-?site|in.?person|come (in|into)|days?\/?\s*week|hybrid|commute|open to working/.test(l)) return 'Yes';
   if (/prepared to|ready to|excited to|open to|comfortable (with|working|in)|startup|fast-?paced|ambiguity|do you meet|meet (the|all|each)/.test(l)) return 'Yes';
   if (/willing|comfortable|able to|can you|do you agree|acknowledge|certify|confirm/.test(l)) return 'Yes';
@@ -115,47 +199,73 @@ function optionForLabel(label, options, a) {
   if (/protected veteran|identify as.*veteran|not a (protected )?veteran|one or more.*veteran/.test(optBlob)) {
     return find(/i am not a (protected )?veteran|not a (protected )?veteran|i am not/i) || find(/^\s*no\b/i);
   }
-  // Race/ethnicity multi-option list (contains "Black or African American" plus
-  // other races). Check BEFORE hispanic — a full race list also lists "Hispanic
-  // or Latino" as one option but is NOT the hispanic yes/no question.
-  if (/black or african american/.test(optBlob)) {
-    return find(/black or african american/i);
-  }
-  if (/\bblack\b/.test(optBlob) && /(white|asian|indigenous|brown|two or more|native|pacific)/.test(optBlob)) {
-    return find(/black or african/i) || find(/^\s*black\s*$/i) || find(/\bblack\b/i);
+  // Race/ethnicity self-ID list → pick the persona's OWN race (from a.race).
+  // Detect the list by its standard EEO options, then choose generically.
+  const looksLikeRaceList = /black or african|two or more races|american indian|pacific islander/.test(optBlob)
+    || (/\bwhite\b/.test(optBlob) && /\basian\b/.test(optBlob));
+  if (looksLikeRaceList) {
+    const rr = raceOptionRe(a);
+    return (rr && find(rr)) || find(/prefer not|decline|do not wish|choose not/i);
   }
   // Hispanic/Latino yes-no question — only when the NEGATION ("Not Hispanic or
   // Latino") is present, which distinguishes it from a race list.
   if (/not hispanic or latino/.test(optBlob)) {
-    return find(/not hispanic or latino|not hispanic/i) || find(/^\s*no\b/i);
+    const hisp = /yes/i.test(a.hispanicLatino || '') ? find(/^\s*hispanic or latino\b|^\s*yes\b/i) : null;
+    return hisp || find(/not hispanic or latino|not hispanic/i) || find(/^\s*no\b/i);
   }
-  if (/(^|[|\s])(male)([|\s]|$)/.test(optBlob) && /(female|non-?binary|prefer not|decline)/.test(optBlob)) {
-    return find(/^\s*male\b/i) || find(/^\s*man\b/i);
+  // Gender option-content detection — derive from persona, not hardcoded male.
+  const gLc = (a.gender || '').toLowerCase();
+  const genderOpt = () => {
+    if (/female|woman/.test(gLc)) return find(/^\s*female\b/i) || find(/^\s*woman\b/i);
+    if (/^male|\bman\b/.test(gLc)) return find(/^\s*male\b/i) || find(/^\s*man\b/i);
+    if (/non.?binary/.test(gLc)) return find(/non.?binary/i) || find(/prefer not|decline/i);
+    return find(/prefer not|decline/i);
+  };
+  const pronounOpt = () => {
+    const p = (a.pronouns || '').toLowerCase();
+    if (/she/.test(p)) return find(/she\s*\/\s*her/i);
+    if (/they/.test(p)) return find(/they\s*\/\s*them/i);
+    if (/he/.test(p)) return find(/he\s*\/\s*him/i);
+    return find(/prefer not/i);
+  };
+  if (/(^|[|\s])(male|female)([|\s]|$)/.test(optBlob) && /(female|non-?binary|prefer not|decline)/.test(optBlob)) {
+    return genderOpt();
   }
 
   // Demographic / EEO (by label)
   if (/transgender/.test(L)) return find(/^\s*no\b/i) || find(/prefer not|decline|do(n'?t| not) wish/i);
-  if (/pronoun/.test(L)) return find(/he\s*\/\s*him/i) || find(/prefer not/i);
-  if (/gender/.test(L)) return find(/^\s*male\b/i) || find(/man/i);
-  if (/hispanic|latino/.test(L)) return find(/not hispanic|^\s*no\b/i);
-  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return find(/black or african/i) || find(/^black$/i) || find(/\bblack\b/i);
+  if (/pronoun/.test(L)) return pronounOpt() || find(/prefer not/i);
+  if (/gender/.test(L)) return genderOpt();
+  if (/hispanic|latino/.test(L)) return (/yes/i.test(a.hispanicLatino || '') ? find(/^\s*yes|hispanic or latino/i) : null) || find(/not hispanic|^\s*no\b/i);
+  if (/\brace\b|ethnicity|skin colou?r/.test(L)) { const rr = raceOptionRe(a); return (rr && find(rr)) || find(/prefer not|decline|do not wish/i); }
   if (/veteran/.test(L)) return find(/not a (protected )?veteran|i am not|^\s*no\b/i);
   if (/disab/.test(L)) return find(/no,? i (don|do not)|^\s*no\b|not have a disability/i);
   if (/sexual orientation|lgbt/.test(L)) return find(/hetero|straight|prefer not/i);
 
   // Years-of-experience range dropdowns ("1-3 years", "4-7 years", "8+ years").
+  // Use the HONEST year count (0 for skills she's never used) and never round UP
+  // to the highest bracket — for a skill she lacks, pick the LOWEST bracket.
   if (/how many years|years of|years.*experience|experience.*years|level of experience|seniority/.test(L) && options.some((o) => /\d/.test(o))) {
-    const yrs = a.totalYearsExperience || 7;
-    let best = null, bestMin = -1;
+    const yrs = parseInt(yearsOfExperienceFor(label, a), 10) || 0;
+    let best = null, bestMin = -1, lowest = null, lowestLo = Infinity;
+    const noneOpt = options.find((o) => /no experience|none|less than (a year|1)|under (a year|1)|^\s*0\b/i.test(o));
     for (const o of options) {
       const range = o.match(/(\d+)\s*[-–to]+\s*(\d+)/);
       const plus = o.match(/(\d+)\s*\+|\bmore than\s*(\d+)|over\s*(\d+)|(\d+)\s*or more/i);
-      if (range) { const lo = +range[1], hi = +range[2]; if (yrs >= lo && yrs <= hi) return o; if (lo <= yrs && lo > bestMin) { best = o; bestMin = lo; } }
-      else if (plus) { const lo = +(plus[1] || plus[2] || plus[3] || plus[4]); if (yrs >= lo && lo > bestMin) { best = o; bestMin = lo; } }
+      if (range) {
+        const lo = +range[1], hi = +range[2];
+        if (yrs >= lo && yrs <= hi) return o;
+        if (lo <= yrs && lo > bestMin) { best = o; bestMin = lo; }
+        if (lo < lowestLo) { lowest = o; lowestLo = lo; }
+      } else if (plus) {
+        const lo = +(plus[1] || plus[2] || plus[3] || plus[4]);
+        if (yrs >= lo && lo > bestMin) { best = o; bestMin = lo; }
+        if (lo < lowestLo) { lowest = o; lowestLo = lo; }
+      }
     }
     if (best) return best;
-    const numeric = options.filter((o) => /\d/.test(o) && !/select|choose/i.test(o));
-    if (numeric.length) return numeric[numeric.length - 1]; // highest available
+    if (yrs === 0 && noneOpt) return noneOpt;   // never-used skill → the "none"/"<1 yr" option
+    if (lowest) return lowest;                   // below all brackets → the LOWEST bracket, never highest
   }
 
   // Logistics
@@ -164,11 +274,23 @@ function optionForLabel(label, options, a) {
            find(/none of the above|not listed|other|none apply|n\/a/i); // our state not offered
   }
   if (/country/.test(L)) return find(/united states|^usa$|u\.s\.a?\.?$|america/i);
-  if (/highest (level of )?(education|degree)|^degree$|education level|degree.*(complete|earned|hold)/.test(L)) return find(/master/i) || find(/bachelor/i) || find(/graduate/i);
-  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) return find(/computer science|software engineering|computer engineering|information (technology|systems)|^engineering|comp(uter)? sci|information science/i) || find(/business|management/i) || find(/other|not listed|none of/i);
+  // Highest-education dropdown: pick the persona's REAL level by rank — never an
+  // option ABOVE what they hold. If the list only has higher degrees, pick
+  // None/Other/Prefer-not rather than claiming one they don't have.
+  if (/highest (level of )?(education|degree)|^degree$|education level|degree.*(complete|earned|hold)/.test(L)) {
+    const pr = degreeRank(a.highestDegree);
+    if (isReal(a.highestDegree)) { const exact = find(new RegExp(a.highestDegree.replace(/[^a-z]/ig, '.?'), 'i')); if (exact) return exact; }
+    let chosen = null, chosenRank = -1;
+    for (const o of options) { const r = degreeRank(o); if (r > 0 && r <= pr && r > chosenRank) { chosen = o; chosenRank = r; } }
+    return chosen || find(/^\s*(none|no degree|no formal|not applicable|n\/?a)\b/i) || find(/prefer not|decline|other/i);
+  }
+  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) {
+    if (isReal(a.highestDegreeField)) { const m = find(new RegExp(a.highestDegreeField.replace(/[^a-z]/ig, '.?'), 'i')); if (m) return m; }
+    return find(/other|not listed|none of|n\/a|general studies|general education|liberal arts/i);
+  }
   if (/ideal work location|work location|location preference|preferred location/.test(L)) return find(/remote/i) || find(/united states|^us$/i);
-  if (/how would you describe your (racial|race|ethnic)|race|ethnicity/.test(L)) return find(/black or african/i) || find(/prefer not|decline/i);
-  if (/gender( identity)?|how.*identify/.test(L)) return find(/^man$|^male$/i) || find(/male|man/i) || find(/prefer not|decline/i);
+  if (/how would you describe your (racial|race|ethnic)|race|ethnicity/.test(L)) { const rr = raceOptionRe(a); return (rr && find(rr)) || find(/prefer not|decline/i); }
+  if (/gender( identity)?|how.*identify/.test(L)) return genderOpt();
   if (/how did you|learn about|hear about|find out about|referral source|hear of/.test(L)) {
     return find(/^\s*linkedin\b/i) || find(/linkedin/i) || find(/other/i);
   }
@@ -187,4 +309,4 @@ function optionForLabel(label, options, a) {
   return null;
 }
 
-module.exports = { textValueForLabel, yesNoForLabel, optionForLabel };
+module.exports = { textValueForLabel, yesNoForLabel, optionForLabel, yearsOfExperienceFor, genderOptionRe, raceOptionRe, pronounOptionRe, degreeRank };

@@ -69,3 +69,19 @@ browser-profile-*/
 *.backup.json
 *.bak.json
 dryrun-*.txt
+
+# Per-persona job queues (runtime output of discover-api.js — your job list)
+queue-*.json
+queue.json
+*.json.bak
+
+# Reviewed answers written by the fill/review pipeline — contains your PII
+# (name, contact, address, answers). NEVER commit.
+data/verified-answers.json
+
+# Learned answers accumulated at runtime (may contain personal answers)
+data/learned-answers.json
+
+# macOS / Claude Code local artifacts
+.DS_Store
+.claude/

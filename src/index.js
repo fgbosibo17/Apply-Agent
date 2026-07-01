@@ -18,9 +18,12 @@ const answers = require('./answers'); // throws if PERSONA not set — intention
 const PROFILE_DIR = process.env.BROWSER_PROFILE
   ? path.resolve(__dirname, '..', process.env.BROWSER_PROFILE)
   : answers.browserProfile;
-// Per-persona queue; fall back to legacy queue.json if the persona file is absent.
+// Queue file: explicit QUEUE env override wins (used for reviewed/approved-only
+// runs), else per-persona queue, else legacy queue.json.
 const PERSONA_QUEUE = path.resolve(__dirname, '..', `queue-${answers.persona}.json`);
-const QUEUE_FILE = fs.existsSync(PERSONA_QUEUE) ? PERSONA_QUEUE : path.resolve(__dirname, '..', 'queue.json');
+const QUEUE_FILE = process.env.QUEUE
+  ? path.resolve(__dirname, '..', process.env.QUEUE)
+  : (fs.existsSync(PERSONA_QUEUE) ? PERSONA_QUEUE : path.resolve(__dirname, '..', 'queue.json'));
 
 const SESSION_TARGET = parseInt(process.env.SESSION_TARGET || '40', 10);
 const MAX_EVALUATED = parseInt(process.env.MAX_EVALUATED || '200', 10);

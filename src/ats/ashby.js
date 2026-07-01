@@ -23,8 +23,8 @@ async function applyAshby(page, jobMeta) {
       && !/United States|US Remote|Americas|North America|Remote, US|Remote \(US/i.test(pageText)) {
     return { status: 'Skipped', reason: 'Non-US location' };
   }
-  if (/US Citizen(?:ship)?\s+required|active\s+(secret|TS\/SCI|clearance)/i.test(pageText)) {
-    return { status: 'Skipped', reason: 'Requires US citizenship or active clearance' };
+  if (/active\s+(secret|TS\/SCI|clearance)/i.test(pageText)) {
+    return { status: 'Skipped', reason: 'Requires active security clearance' };
   }
 
   // ── Resume upload (autofills name/email on Ashby) ──
