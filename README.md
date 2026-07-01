@@ -75,6 +75,14 @@ npm install
 npx playwright install chrome    # uses your real Chrome channel
 ```
 
+Then drop your resume(s) into `Resume/` and use the ready-made prompts in
+**[`prompts/`](prompts/)** — fill in the blanks and paste into Claude Code:
+
+- **[`prompts/01-first-run.md`](prompts/01-first-run.md)** — first time: reads your resume,
+  builds your profile, asks what it can't find, then applies (review-before-submit).
+- **[`prompts/02-subsequent-runs.md`](prompts/02-subsequent-runs.md)** — every run after: skips
+  setup and applies to more jobs.
+
 Then **either** drive it with Claude Code (recommended):
 
 1. Open this folder in Claude Code (`claude`).
