@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Job Apply Agent",
+  "version": "1.2.0",
+  "description": "Fills job applications on company ATS pages from your saved persona, then lets you refine any answer with Claude before you submit — runs in your real Chrome.",
+  "permissions": ["scripting", "activeTab", "storage", "tabs", "debugger"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Job Apply Agent" }
+}

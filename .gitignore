@@ -85,3 +85,6 @@ data/learned-answers.json
 # macOS / Claude Code local artifacts
 .DS_Store
 .claude/
+
+# Extension: real persona data (copy personas.example.js). Never commit PII.
+extension/personas.js

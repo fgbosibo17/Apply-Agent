@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px -apple-system, Segoe UI, sans-serif; width: 300px; margin: 0; padding: 14px; color: #1a1a1a; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; font-weight: 600; margin: 10px 0 4px; }
+    select { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 9px; border: 0; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    #fill { background: #eef2ff; color: #3730a3; }
+    #fillSubmit { background: #4f46e5; color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { margin-top: 12px; padding: 8px; background: #f6f6f6; border-radius: 6px; font-size: 12px; white-space: pre-wrap; min-height: 16px; }
+    .who { font-size: 11px; color: #666; margin-top: 4px; }
+    .profile-warn { font-size: 11px; margin-top: 6px; padding: 6px 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 6px; }
+    #jobs { margin-top: 8px; max-height: 180px; overflow-y: auto; }
+    .job-row { display: flex; align-items: center; border-bottom: 1px solid #eee; }
+    .job-row a { flex: 1; min-width: 0; font-size: 11px; padding: 5px 6px; color: #1d4ed8; text-decoration: none; }
+    .job-row a:hover { background: #f0f6ff; }
+    .job-x { flex: 0 0 auto; color: #bbb; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 8px; }
+    .job-x:hover { color: #dc2626; }
+    #jobs .src { color: #999; }
+    .jobs-head { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 11px; color: #666; }
+    .jobs-head a { color: #dc2626; cursor: pointer; text-decoration: none; }
+    #pendingLog { margin-top: 8px; padding: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 11px; display: none; }
+    #pendingLog .plog-row { display: flex; gap: 6px; margin-top: 6px; }
+    #pendingLog button { padding: 6px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>Job Apply Agent</h1>
+  <label for="persona">Resume / role track</label>
+  <select id="persona">
+    <optgroup label="Identity A">
+      <option value="qa">QA Automation / SDET</option>
+    </optgroup>
+    <optgroup label="Identity B">
+      <option value="cloud">Cloud / DevOps / SRE</option>
+      <option value="fullstack">Full-Stack / Software Engineer</option>
+    </optgroup>
+  </select>
+  <div class="who" id="who"></div>
+  <div class="profile-warn" id="profileWarn"></div>
+  <div class="row">
+    <button id="find" style="background:#ecfdf5;color:#065f46;">🔍 Find jobs</button>
+  </div>
+  <div class="jobs-head" id="jobsHead" style="display:none"><span id="jobsCount"></span><a id="clearJobs">clear all</a></div>
+  <div id="jobs"></div>
+  <div id="pendingLog"></div>
+  <div class="row">
+    <button id="fill">Fill only</button>
+    <button id="fillSubmit">Fill + Submit</button>
+  </div>
+  <div id="status">Pick a persona → "Find jobs" to discover, or open an apply page and Fill.</div>
+  <script src="personas.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
