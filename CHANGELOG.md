@@ -8,6 +8,10 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Newest first.
 
 ## [Unreleased]
+_Nothing yet — add changes here as you ship them._
+
+## [0.1.0] - 2026-07-23
+_First public preview. Still rough — expect changes._
 ### Added
 - **Chrome extension** for applying by hand in your own browser:
   - One-click autofill on company ATS pages (Greenhouse, Lever, Ashby, Workable, and more).
