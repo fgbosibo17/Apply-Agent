@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Apply Agent — Updates & Changelog</title>
+<meta name="description" content="An AI copilot that finds jobs and fills out applications. Release notes and updates." />
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1f; --muted: #6b7280; --card: #f7f7f9;
+    --border: #e5e7eb; --accent: #4f46e5; --accent-fg: #ffffff; --link: #4338ca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0e12; --fg: #e8e8ea; --muted: #9aa0aa; --card: #17171d;
+      --border: #2a2a33; --accent: #7c74f0; --accent-fg: #0e0e12; --link: #a5a0f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px 80px; }
+  header { padding: 64px 0 24px; }
+  .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+  h1 { font-size: 40px; line-height: 1.1; margin: 10px 0 8px; }
+  .tag { color: var(--muted); font-size: 18px; margin: 0; }
+  .btns { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 10px 16px; border-radius: 9px;
+    text-decoration: none; font-weight: 600; font-size: 14px; border: 1px solid var(--border); color: var(--fg); background: var(--card); }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; margin: 28px 0; }
+  .card h2 { margin: 0 0 6px; font-size: 20px; }
+  .sub-list { margin: 14px 0 0; padding: 0; list-style: none; }
+  .sub-list li { padding: 10px 0; border-top: 1px solid var(--border); }
+  .sub-list li:first-child { border-top: 0; }
+  .sub-list b { display: block; }
+  .sub-list span { color: var(--muted); font-size: 14px; }
+  a { color: var(--link); }
+  #changelog { margin-top: 8px; }
+  #changelog h1 { display: none; }
+  #changelog h2 { font-size: 22px; margin: 40px 0 4px; padding-top: 20px; border-top: 1px solid var(--border); }
+  #changelog h3 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin: 18px 0 6px; }
+  #changelog code { background: var(--card); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 90%; }
+  #changelog ul { padding-left: 22px; }
+  #changelog hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
+  footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--border); padding-top: 24px; margin-top: 40px; }
+  .loading { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Apply Agent</div>
+    <h1>Updates &amp; changelog</h1>
+    <p class="tag">An AI copilot that finds jobs and fills out applications for you.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/fgbosibo17/Apply-Agent">View on GitHub</a>
+      <a class="btn" href="https://github.com/fgbosibo17/Apply-Agent/releases">Releases</a>
+      <a class="btn" href="https://github.com/fgbosibo17/Apply-Agent/releases.atom">RSS feed</a>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>🔔 Get notified of updates</h2>
+    <ul class="sub-list">
+      <li>
+        <b>Watch releases on GitHub</b>
+        <span>On the <a href="https://github.com/fgbosibo17/Apply-Agent">repo</a>, click
+        <b>Watch → Custom → Releases</b>. GitHub emails you every time a new version ships.</span>
+      </li>
+      <li>
+        <b>Subscribe via RSS</b>
+        <span>Add <a href="https://github.com/fgbosibo17/Apply-Agent/releases.atom">the releases feed</a>
+        to any reader for automatic update notifications — no account needed.</span>
+      </li>
+      <li>
+        <b>Already installed the extension?</b>
+        <span>It's loaded unpacked for now, so after an update: <code>git pull</code>, then hit
+        <b>Reload</b> on the extension card in <code>chrome://extensions</code>.</span>
+      </li>
+    </ul>
+  </div>
+
+  <div id="changelog"><p class="loading">Loading changelog…</p></div>
+
+  <footer>
+    Built by <a href="https://github.com/fgbosibo17">@fgbosibo17</a> ·
+    <a href="https://github.com/fgbosibo17/Apply-Agent">source</a>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  const RAW = "https://raw.githubusercontent.com/fgbosibo17/Apply-Agent/main/CHANGELOG.md";
+  const el = document.getElementById("changelog");
+  fetch(RAW, { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); })
+    .then((md) => {
+      if (window.marked) el.innerHTML = marked.parse(md);
+      else el.innerHTML = "<pre>" + md.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])) + "</pre>";
+    })
+    .catch(() => {
+      el.innerHTML = '<p class="loading">Couldn\'t load the changelog. Read it '
+        + '<a href="https://github.com/fgbosibo17/Apply-Agent/blob/main/CHANGELOG.md">on GitHub</a>.</p>';
+    });
+</script>
+</body>
+</html>
