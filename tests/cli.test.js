@@ -64,7 +64,9 @@ test('profile refuses to store a secret-shaped field', () => {
 });
 
 test('autonomy, attention and round commands are reachable end to end', () => {
-  assert.equal(run(['autonomy', 'status']).out.mode, 'review-each');
+  // With no grant the CLI reports the configured default (core/config.js ships
+  // routine-auto), not a hardcoded mode.
+  assert.equal(run(['autonomy', 'status']).out.mode, require('../src/core/config')().defaultAutonomyMode);
   assert.equal(run(['autonomy', 'grant', '--stdin'], { mode: 'routine-auto', hours: 2 }).out.mode, 'routine-auto');
   assert.equal(run(['autonomy', 'revoke']).out.granted, false);
   run(['attention', 'add', '--stdin'], { kind: 'captcha', url: 'https://x.example/1' });

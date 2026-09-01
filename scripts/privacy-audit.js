@@ -146,9 +146,24 @@ for (const f of tracked) {
   }
 }
 
-// Populated-history scan. `publishing` means we are judging what a commit would
-// expose, so a populated data file is fatal; on a bare working tree it is noted.
-const publishing = !!ref || strict;
+// ── Which repo is being audited? ───────────────────────────────────────────
+// A repo may declare itself the owner's PRIVATE data repo by tracking this
+// marker. There, real personas and a real application history are the POINT, so
+// they are reported instead of fatal — otherwise CI on the private repo fails
+// permanently and the whole gate gets disabled, which is worse than useless.
+//
+// What stays fatal in EVERY repo is anything dangerous regardless of visibility:
+// tracked browser profiles (session cookies), resumes, secrets, or a missing
+// ignore rule. Private does not mean unguarded.
+//
+// The marker is read from the TREE BEING AUDITED, so `--ref <public-ref>` run
+// from inside the private repo is still judged strictly — the public ref does not
+// carry the marker.
+const PRIVATE_MARKER = '.private-data-repo';
+const isPrivateDataRepo = tracked.includes(PRIVATE_MARKER);
+
+// `publishing` means we are judging what a commit would expose to the public.
+const publishing = (!!ref || strict) && !isPrivateDataRepo;
 for (const f of tracked) {
   const rule = HISTORY_FILES.find(([re]) => re.test(f));
   if (!rule) continue;
@@ -158,15 +173,28 @@ for (const f of tracked) {
   if (publishing) blocking.push(msg); else history.push(msg);
 }
 
-const report = { strict, ref: ref || 'working-tree', tracked: tracked.length, blocking, publish, history };
+const report = {
+  strict,
+  repo: isPrivateDataRepo ? 'private-data' : 'public',
+  ref: ref || 'working-tree',
+  tracked: tracked.length,
+  blocking,
+  publish,
+  history,
+};
 if (require.main === module) {
   console.log(JSON.stringify(report, null, 2));
-  const failed = blocking.length > 0 || (strict && publish.length > 0);
+  // PII in tracked source is expected in the private data repo; elsewhere it is
+  // the thing this audit exists to stop.
+  const failed = blocking.length > 0 || (strict && publish.length > 0 && !isPrivateDataRepo);
   if (failed) {
     console.error('\nprivacy audit FAILED');
-    if (publish.length && strict) console.error('Tracked source files contain real candidate PII. Replace with placeholders before pushing to the public remote.');
+    if (publish.length && strict && !isPrivateDataRepo) console.error('Tracked source files contain real candidate PII. Replace with placeholders before pushing to the public remote.');
     process.exit(1);
   }
-  console.log('\nprivacy audit passed' + (publish.length ? ` (${publish.length} PII finding(s) tolerated on a local tree — run with --strict before pushing)` : ''));
+  const note = isPrivateDataRepo
+    ? ` (private data repo: ${publish.length} PII and ${history.length} populated-data finding(s) expected)`
+    : (publish.length ? ` (${publish.length} PII finding(s) tolerated on a local tree — run with --strict before pushing)` : '');
+  console.log('\nprivacy audit passed' + note);
 }
 module.exports = { audit: () => report };
