@@ -16,7 +16,7 @@
     "preapply": "node src/prerun.js",
     "apply": "node src/index.js",
     "refine-helper": "node src/refine-helper.js",
-    "test": "node --test \"tests/*.test.js\"",
+    "test": "node --test tests/",
     "check": "node --check src/cli.js && node --check src/index.js && node --check src/core/ledger.js && node --check src/core/score.js && node --check src/core/canonical.js && node --check src/core/autonomy.js && node --check src/core/secret-store.js && node --check src/core/queues.js && node --check src/core/rounds.js && node --check src/core/sources.js && node --check src/core/migrate.js && node --check src/feeds.js && node --check src/util/eligibility.js && node --check src/discover-api.js && node --check src/discover-aggregators.js && node --check src/discover-community.js",
     "agent": "node bin/apply-agent.js",
     "migrate": "node bin/apply-agent.js migrate",
