@@ -3,8 +3,8 @@
 // and appends de-duped candidates to a per-persona queue. No login needed, runs in
 // a throwaway profile so it never conflicts with the apply batch's cloud profile.
 //
-//   PERSONA=primary node src/discover-ats.js
-//   PERSONA=primary QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
+//   PERSONA=cloud node src/discover-ats.js
+//   PERSONA=cloud QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
 //
 // Queue file: queue-<persona>.json (candidates appended, deduped by URL).
 
@@ -15,7 +15,10 @@ const answers = require('./answers'); // throws if PERSONA unset
 
 const PERSONA = (process.env.PERSONA || '').toLowerCase();
 const QUEUE_FILE = path.resolve(__dirname, '..', `queue-${PERSONA}.json`);
-const DISCOVERY_PROFILE = path.resolve(__dirname, '..', 'browser-profile-discovery');
+// Google searching runs in the PERSONA's own profile rather than a throwaway
+// 'browser-profile-discovery' dir. One profile per persona is the rule now, and
+// a signed-in Google session actually gets challenged LESS than a cold one.
+const DISCOVERY_PROFILE = answers.browserProfile;
 
 // Persona → default query set (overridable via QUERIES env).
 const DEFAULT_QUERIES = {
@@ -28,7 +31,7 @@ const QUERIES = (process.env.QUERIES ? process.env.QUERIES.split(',') : DEFAULT_
 
 // ATS domains + URL match patterns + how to clean each.
 const ATS = [
-  { name: 'greenhouse', q: '(site:boards.greenhouse.io OR site:job-boards.greenhouse.io)', re: /greenhouse\.io\/[^/]+\/jobs\/\d+/i, clean: u => u.split('?')[0].split('#')[0] },
+  { name: 'greenhouse', q: 'site:job-boards.greenhouse.io', re: /greenhouse\.io\/[^/]+\/jobs\/\d+/i, clean: u => u.split('?')[0].split('#')[0] },
   { name: 'lever', q: 'site:jobs.lever.co', re: /jobs\.lever\.co\/[^/]+\/[a-f0-9-]{20,}/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/apply$/, '') },
   { name: 'ashby', q: 'site:jobs.ashbyhq.com', re: /jobs\.ashbyhq\.com\/[^/]+\/[a-f0-9-]{20,}/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/application$/, '') },
   { name: 'workable', q: 'site:apply.workable.com', re: /apply\.workable\.com\/[^/]+\/j\/[A-Z0-9]+/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/apply\/?$/, '') },
@@ -61,29 +64,63 @@ function companyFromUrl(url) {
   const seen = new Set(existing.map(j => j.url));
   const found = [];
 
+  // Search engine is selectable (Google hard-blocks automated queries). Bing and
+  // especially DuckDuckGo's HTML endpoint tolerate scripted site: searches.
+  const ENGINE = (process.env.SEARCH_ENGINE || 'google').toLowerCase();
+  const isDDG = ENGINE === 'duckduckgo' || ENGINE === 'ddg';
+  // Location hint appended to every query — default remote-US; set LOC=Texas (etc.)
+  // to hunt hybrid-in-Texas roles (per the user's "then hybrid in Texas" scope).
+  const LOC = process.env.LOC || 'remote US';
+  const searchUrl = (atsQ, query, start) => {
+    const q = `${atsQ} "${query}" ${LOC}`;
+    if (ENGINE === 'bing') return `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=30&first=${start + 1}`;
+    if (isDDG) return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}${start ? `&s=${start}&dc=${start + 1}` : ''}`;
+    return `https://www.google.com/search?q=${encodeURIComponent(q)}&num=30&start=${start}`;
+  };
+  // DuckDuckGo tolerates pagination — pull 3 result pages per query for ~3x supply.
+  const PAGES = isDDG ? [0, 30, 60] : [0];
+
   for (const ats of ATS) {
     for (const query of QUERIES) {
-      const g = `https://www.google.com/search?q=${encodeURIComponent(`${ats.q} "${query}" remote US`)}&num=30`;
-      await page.goto(g, { waitUntil: 'domcontentloaded' }).catch(() => {});
-      await sleep(page, 1500);
-
-      // Captcha / block detection
-      const blocked = await page.evaluate(() => /unusual traffic|not a robot|enablejs/i.test(document.body.innerText)).catch(() => false);
-      if (blocked) { console.log(`  [${ats.name}] "${query}" — BLOCKED by Google, backing off 8s`); await sleep(page, 8000); continue; }
-
       const reSrc = ats.re.source, reFlags = ats.re.flags;
-      const urls = await page.evaluate(({ reSrc, reFlags }) => {
-        const re = new RegExp(reSrc, reFlags);
-        const out = [];
-        document.querySelectorAll('a').forEach(a => {
-          const href = a.href || '';
-          if (re.test(href)) {
-            const t = a.querySelector('h3');
-            out.push({ href, title: t ? t.innerText : a.innerText.split('\n')[0].slice(0, 90) });
-          }
-        });
-        return out;
-      }, { reSrc, reFlags }).catch(() => []);
+      const urls = [];
+      const seenHref = new Set();
+      for (const start of PAGES) {
+        await page.goto(searchUrl(ats.q, query, start), { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await sleep(page, 1500);
+        const blocked = await page.evaluate(() => /unusual traffic|are you a robot|not a robot|please verify|captcha|blocked|enablejs/i.test(document.body.innerText.slice(0, 2000))).catch(() => false);
+        if (blocked) { console.log(`  [${ats.name}] "${query}" p${start} — BLOCKED by ${ENGINE}, backing off 8s`); await sleep(page, 8000); break; }
+        const pageUrls = await page.evaluate(({ reSrc, reFlags }) => {
+          const re = new RegExp(reSrc, reFlags);
+          // Resolve engine redirect wrappers to the real destination URL.
+          const resolve = (href) => {
+            try {
+              const u = new URL(href, location.origin);
+              if (/google\./.test(u.hostname) && u.searchParams.get('q')) return u.searchParams.get('q');
+              if (u.searchParams.get('uddg')) return decodeURIComponent(u.searchParams.get('uddg')); // DuckDuckGo
+              if (u.searchParams.get('u')) { // Bing ck/a
+                let b = u.searchParams.get('u').replace(/^a1/, '').replace(/-/g, '+').replace(/_/g, '/');
+                try { return atob(b); } catch { /* not base64 */ }
+              }
+              return href;
+            } catch { return href; }
+          };
+          const out = [];
+          document.querySelectorAll('a').forEach(a => {
+            const real = resolve(a.href || '');
+            if (re.test(real)) {
+              const t = a.querySelector('h3');
+              out.push({ href: real, title: t ? t.innerText : (a.innerText || '').split('\n')[0].slice(0, 90) });
+            }
+          });
+          return out;
+        }, { reSrc, reFlags }).catch(() => []);
+        const fresh = pageUrls.filter(x => !seenHref.has(x.href));
+        fresh.forEach(x => seenHref.add(x.href));
+        urls.push(...fresh);
+        if (!fresh.length) break; // page yielded nothing new → stop paginating this query
+        await sleep(page, 800);
+      }
 
       let added = 0;
       for (const { href, title } of urls) {

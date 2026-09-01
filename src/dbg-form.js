@@ -2,10 +2,11 @@
 // application form, and dumps every field with its associated label, plus buttons
 // and captcha/iframe signals. Usage: node src/dbg-form.js <url> [applyButtonText]
 const { chromium } = require('playwright');
+const answers = require('./answers'); // PERSONA picks the profile; was hardcoded to qa
 
 (async () => {
   const url = process.argv[2];
-  const ctx = await chromium.launchPersistentContext('./browser-profile-qa', { headless: false, channel: 'chrome', viewport: null });
+  const ctx = await chromium.launchPersistentContext(answers.browserProfile, { headless: false, channel: 'chrome', viewport: null });
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 }).catch((e) => console.log('goto err', e.message));
   await page.waitForTimeout(2500);

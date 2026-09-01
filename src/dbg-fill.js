@@ -1,6 +1,6 @@
 // Dry-run fill test: open ATS URLs, run the REAL handler with DRY_RUN
 // (fills everything, screenshots, does NOT submit). Reports unfilled required.
-// Usage: PERSONA=primary DRY_RUN=1 node src/dbg-fill.js <url> [url2 ...]
+// Usage: PERSONA=qa DRY_RUN=1 node src/dbg-fill.js <url> [url2 ...]
 const { chromium } = require('playwright');
 const { applyGreenhouse } = require('./ats/greenhouse');
 const { applyLever } = require('./ats/lever');
@@ -22,7 +22,9 @@ function route(url) {
 
 (async () => {
   const urls = process.argv.slice(2);
-  const ctx = await chromium.launchPersistentContext('./browser-profile-qa', {
+  // The persona's own profile — was hardcoded to browser-profile-qa, which meant
+  // a PERSONA=cloud dry run filled forms in the qa identity's browser.
+  const ctx = await chromium.launchPersistentContext(require('./answers').browserProfile, {
     headless: false, channel: 'chrome', viewport: null, args: ['--start-maximized'],
   });
   const page = ctx.pages()[0] || await ctx.newPage();

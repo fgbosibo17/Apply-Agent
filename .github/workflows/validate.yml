@@ -1,0 +1,39 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The privacy audit compares against git refs; a shallow clone is fine
+          # for the working-tree pass but full history keeps --ref usable.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Hard gate on the PUBLIC branch: no tracked ledgers, browser profiles,
+      # resumes or secrets, and no real candidate PII in tracked source.
+      - name: Privacy audit (strict)
+        run: npm run privacy-audit:strict

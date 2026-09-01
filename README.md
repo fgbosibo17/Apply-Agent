@@ -68,6 +68,72 @@ It launches **your real, installed Chrome** with a persistent profile (`channel:
 
 ---
 
+## The decision layer (`apply-agent` CLI)
+
+Browser automation is only half the job. Everything that must **not** be decided
+from memory — is this a duplicate, is this a good enough fit, may I submit
+without asking, what actually converted — lives behind a dependency-free CLI:
+
+```bash
+node bin/apply-agent.js help
+```
+
+| Command | What it settles |
+|---|---|
+| `score --stdin` | A **gate before the number**: `exclude` / `ask` / `skip` / `review`, plus `autoEligible` (necessary, never sufficient, to auto-submit) |
+| `ledger check --stdin` | Four-way duplicate check — ledger id, canonical URL, employer job id, requisition — plus a same-company reapply cooldown |
+| `ledger add --stdin` | Records a submission. **Refuses an entry with no confirmation evidence** — a filled form is not a submission |
+| `ledger outcome --stdin` | Structured outcomes (`rejected`, `interview`, `offer`, …) with a reason marked `explicit` or `inferred` |
+| `ledger review` | Unique submissions, duplicate rows, and response/positive rates by discovery source, channel, score band and persona — over applications old enough to have heard back |
+| `autonomy grant/status/revoke` | `review-each` vs `routine-auto`, time-boxed and scopable to one persona or batch. Some things stop in **every** mode |
+| `attention add/list/resolve` | Park what needs *you* (login, CAPTCHA, a duplicate call) instead of losing it to an `Error` row |
+| `friction record/list` | Reproducible tooling failures, aggregated by signature — never blocks an application |
+| `round start/status/complete` | One ID across every fresh-browser batch, so an overnight run is a single addressable unit |
+| `profile set/check/field` | Identity in the **OS keychain** (macOS Keychain, Windows DPAPI, libsecret) — not in a tracked file |
+| `sources list/add` | Versioned local discovery-source catalog |
+| `migrate` | Backfills `applications-log.csv` into the ledger so history works from day one |
+
+Every command reads JSON on stdin and writes JSON to stdout, so it composes with
+Claude Code, a shell script, or the Playwright runner. The runner calls
+`ledger check` before each application and `ledger add` after each confirmed
+submission automatically.
+
+### Why the ledger beats the CSV
+
+The CSV deduped on an exact URL string. The ledger canonicalizes first, so one
+requisition collapses across `boards.` vs `job-boards.greenhouse.io`, an
+`/application` suffix, and any tracking params — and it still catches the case
+where the *same job* arrives from a second discovery source. Backfilling the
+existing history surfaced 21 applications that had been submitted twice.
+
+```bash
+node bin/apply-agent.js migrate      # one-time backfill; the CSVs stay untouched
+node bin/apply-agent.js ledger review
+```
+
+### Privacy
+
+Nothing leaves the machine — no telemetry, no community registry, no analytics
+endpoint. `.state/` holds the ledgers and is gitignored. CI runs a privacy audit
+that **fails the build** if a ledger, browser profile, resume, secret or real
+candidate PII ever reaches a tracked file:
+
+```bash
+npm run privacy-audit             # local tree: blocking findings only
+npm run privacy-audit:strict      # also fails on real PII — run before pushing
+node scripts/privacy-audit.js --ref origin/main --strict   # audit what is actually published
+```
+
+### Tests
+
+```bash
+npm test        # 61 tests: canonicalization, dedup, gates, autonomy, queues, migration, CLI
+npm run check   # syntax check every entry point
+```
+
+
+---
+
 ## Quick start
 
 ```bash
@@ -103,6 +169,11 @@ Then **either** drive it with Claude Code (recommended):
 # 1) Discover jobs for a persona → builds queue-<persona>.json
 PERSONA=primary node src/discover-api.js --max 800
 
+# 1b) Optional: grow the company-token pool first, so step 1 has more to sweep
+node src/discover-hn.js                    # "Ask HN: Who is hiring?" threads
+node src/discover-community.js             # community registry of confirmed job URLs
+node src/discover-aggregators.js           # 7 public remote boards → validated tokens
+
 # 2) Apply (one fresh-browser batch)
 PERSONA=primary SESSION_TARGET=25 node src/index.js
 
@@ -132,6 +203,10 @@ src/
   run-loop.js         batch loop (fresh browser per batch + watchdog)
   discover-api.js     finds jobs via public ATS JSON APIs, filters by role + location
   discover-hn.js      harvests company ATS tokens from "Ask HN: Who is hiring?"
+  discover-community.js reads the job-application-agent community job registry (GET only)
+  discover-aggregators.js seeds tokens from 7 public remote boards (see src/feeds.js)
+  feeds.js            RSS/JSON clients for the non-ATS boards
+  util/eligibility.js one shared role/location/recency filter for every discovery runner
   import-companies.js bulk-imports public ATS company-token datasets
   personas.js   ←── YOUR identity + answers (edit this)
   answer-bank.js ←── screening-question answer engine (customize for your field)

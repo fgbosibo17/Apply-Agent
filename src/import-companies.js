@@ -37,7 +37,7 @@ function fromCsvSlug(text) {
     smartrecruiters: [[`${KAL}/smartrecruiters.csv`, fromCsvSlug]],
   };
   // Per-ATS cap to keep the file/sweep manageable (plenty for the targets).
-  const CAP = { greenhouse: 8500, lever: 3500, ashby: 4000, workable: 2000, smartrecruiters: 1000 };
+  const CAP = { greenhouse: 30000, lever: 10000, ashby: 15000, workable: 6000, smartrecruiters: 4000 };
 
   const file = path.resolve(__dirname, '..', 'data', 'companies.json');
   const companies = JSON.parse(fs.readFileSync(file, 'utf8'));

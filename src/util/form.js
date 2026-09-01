@@ -1,6 +1,6 @@
 // Shared form-filling helpers used across ATS handlers.
 const a = require('../answers');
-const { textValueForLabel, optionForLabel } = require('./answers-map');
+const { textValueForLabel, optionForLabel, yesNoForLabel } = require('./answers-map');
 const { generateAnswer } = require('../answer-bank');
 const { getEmailCode } = require('./email-code');
 const { getLearned, saveLearned } = require('./learned');
@@ -150,6 +150,10 @@ async function fillRemainingRequired(scope) {
       // "N/A" (NEVER a location or random token in an unrelated field).
       if (tag === 'TEXTAREA' || /\?|why|describe|tell us|explain|how (would|do|did)|what (makes|interests|excites)|cover letter|anything else|additional|experience|background|relevant|in your own words|elaborate|provide (details|examples)|walk us through/i.test(label)) {
         val = generateAnswer(label || 'your background', a);
+        // A required essay must NEVER be left empty (blocks submit). If the
+        // answer-bank produced nothing for an unusual prompt, fall back to a
+        // credible role blurb rather than leaving the field blank.
+        if (!val || !String(val).trim()) val = a.whyThisRoleBlurb || a.elevatorPitch || 'N/A';
       } else {
         val = 'N/A';
       }
@@ -198,15 +202,33 @@ async function proofread(scope) {
     else if (isReferral && /referr|recruit|who (told|referred)/.test(ll) && !/how did you hear/.test(ll) && val.length < 40 && !/n\/a|none|n\.a\./i.test(val)) {
       // leave real answers alone; only fix location/state junk (handled above). otherwise keep.
     }
+    // REVIEW: a YES/NO-phrased question (aux-verb start) that got a long ESSAY →
+    // wrong. Replace with the proper Yes/No. Skip if the label asks to describe/
+    // explain (those legitimately want prose).
+    const isYesNoQ = /^\s*(do|does|did|are|is|was|were|have|has|had|can|could|will|would|should|may|must|shall)\b/i.test(label);
+    if (!fix && isYesNoQ && val.length > 35 &&
+        !/describe|explain|why\b|how (would|do|did|many|much|long)|tell us|elaborate|provide (details|examples|context)|in your own words|walk us through|please (share|describe|explain|tell|provide)|what (is|are|was|makes|motivat)/i.test(ll)) {
+      fix = yesNoForLabel(label, a) || 'Yes';
+    }
     if (fix && fix !== val) await el.fill(String(fix)).catch(() => {});
   }
+}
+
+// Where a dry-run screenshot goes. These are full-page captures of a form already
+// filled with the persona's name, email, phone, address and work-authorization
+// answers, so they are written to the owner-only 0700 state dir rather than the
+// repo root where they used to accumulate as dryrun-<company>.png.
+function dryRunShotPath(company) {
+  const paths = require('../core/paths');
+  const safe = String(company || 'ats').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').slice(0, 60);
+  return require('path').join(paths.dryRuns(), `dryrun-${safe}.png`);
 }
 
 // DRY_RUN guard: screenshot and return a DryRun result (no submit). Returns null
 // when DRY_RUN is off so the caller proceeds to submit.
 async function dryRunStop(page, company, note) {
   if (!process.env.DRY_RUN) return null;
-  const fname = `dryrun-${company || 'ats'}.png`;
+  const fname = dryRunShotPath(company);
   await page.screenshot({ path: fname, fullPage: true }).catch(() => {});
   return { status: 'DryRun', reason: (note || 'filled') + ' — ' + fname };
 }
@@ -246,5 +268,5 @@ async function handleEmailVerification(context, page, scope = page) {
 
 module.exports = {
   labelOf, fillTextByLabel, handleRadioGroups, handleNativeSelects,
-  fillRemainingRequired, proofread, dryRunStop, confirmAfterSubmit, handleEmailVerification,
+  fillRemainingRequired, proofread, dryRunStop, dryRunShotPath, confirmAfterSubmit, handleEmailVerification,
 };

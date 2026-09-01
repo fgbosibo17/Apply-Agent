@@ -1,6 +1,6 @@
 // DRY-RUN a single application through the real handler (no submit). Verifies
 // fill quality (EEO radios, screening answers) via a full-page screenshot.
-// Usage: PERSONA=primary DRY_RUN=1 node src/dbg-apply.js <url> [company]
+// Usage: PERSONA=cloud DRY_RUN=1 node src/dbg-apply.js <url> [company]
 const { chromium } = require('playwright');
 const { applyGreenhouse } = require('./ats/greenhouse');
 const { applyAshby } = require('./ats/ashby');
@@ -74,7 +74,8 @@ function detectAts(url) {
   console.log('\n=== COMBOBOXES (react-select) ===');
   for (const c of (report.combos || [])) console.log(`  [${c.val}]  <- ${c.q}`);
 
-  await page.screenshot({ path: `dryrun-${COMPANY}.png`, fullPage: true }).catch(() => {});
-  console.log(`\nScreenshot: dryrun-${COMPANY}.png`);
+  const shot = require('./util/form').dryRunShotPath(COMPANY);
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  console.log(`\nScreenshot: ${shot}`);
   await ctx.close();
 })();

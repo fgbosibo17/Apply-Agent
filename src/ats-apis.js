@@ -42,6 +42,14 @@ function fetchJson(url, { method = 'GET', body = null, timeout = 12000 } = {}) {
 
 const stripHost = (u) => (u || '').split('?')[0].split('#')[0];
 
+// Parse an ATS date field (ISO string or epoch s/ms) to epoch ms, or null.
+const toMs = (d) => {
+  if (d == null || d === '') return null;
+  if (typeof d === 'number') return d > 1e12 ? d : d * 1000; // s vs ms
+  const t = Date.parse(d);
+  return Number.isNaN(t) ? null : t;
+};
+
 // ── Per-ATS fetchers: token -> [normalized jobs] ────────────────────────────
 
 async function greenhouse(token) {
@@ -59,6 +67,7 @@ async function greenhouse(token) {
       url: `https://boards.greenhouse.io/${token}/jobs/${j.id}`,
       remote: /remote/i.test(loc),
       workplaceType: /hybrid/i.test(loc) ? 'hybrid' : (/remote/i.test(loc) ? 'remote' : ''),
+      posted: toMs(j.updated_at || j.first_published),
       ats: 'greenhouse',
       company: token,
     };
@@ -77,6 +86,7 @@ async function lever(token) {
       url: stripHost(j.hostedUrl || `https://jobs.lever.co/${token}/${j.id}`),
       remote: /remote/i.test(loc) || /remote/i.test(j.workplaceType || ''),
       workplaceType: (j.workplaceType || (/hybrid/i.test(loc) ? 'hybrid' : (/remote/i.test(loc) ? 'remote' : ''))).toLowerCase(),
+      posted: toMs(j.createdAt),
       ats: 'lever',
       company: token,
     };
@@ -95,6 +105,7 @@ async function ashby(token) {
       url: stripHost(j.jobUrl || `https://jobs.ashbyhq.com/${token}/${j.id}`),
       remote: !!j.isRemote || /remote/i.test(j.workplaceType || ''),
       workplaceType: (j.workplaceType || (j.isRemote ? 'remote' : (/hybrid/i.test(j.location || '') ? 'hybrid' : ''))).toLowerCase(),
+      posted: toMs(j.publishedAt || j.updatedAt),
       ats: 'ashby',
       company: token,
     }));
@@ -117,6 +128,7 @@ async function workable(token) {
       url: stripHost(`https://apply.workable.com/${token}/j/${j.shortcode}/`),
       remote: !!j.remote,
       workplaceType: j.remote ? 'remote' : (/hybrid/i.test(loc) ? 'hybrid' : ''),
+      posted: toMs(j.published_on || j.created_at || j.published),
       ats: 'workable',
       company: token,
     };
@@ -136,6 +148,7 @@ async function smartrecruiters(token) {
       url: stripHost(j.ref ? `https://jobs.smartrecruiters.com/${token}/${j.id}` : `https://jobs.smartrecruiters.com/${token}/${j.id}`),
       remote: !!l.remote || /remote/i.test(loc),
       workplaceType: (l.remote || /remote/i.test(loc)) ? 'remote' : (/hybrid/i.test(loc) ? 'hybrid' : ''),
+      posted: toMs(j.releasedDate),
       ats: 'smartrecruiters',
       company: token,
     };

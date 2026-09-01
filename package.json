@@ -1,15 +1,38 @@
 {
-  "name": "autonomous-job-apply-agent",
+  "name": "job-agent",
   "version": "1.0.0",
-  "description": "AI-driven agent that discovers and applies to remote/hybrid jobs across ATSs (Greenhouse/Lever/Ashby/Workable/SmartRecruiters) — quality answers, EEO, captcha-aware, dedup.",
+  "description": "AI-powered job application agent using Claude + Playwright MCP",
   "private": true,
   "scripts": {
-    "setup": "npx playwright install chrome",
+    "setup": "npx playwright install chromium",
+    "prerun": "node src/prerun.js",
+    "prerun:status": "node src/prerun.js --status",
+    "prediscover": "node src/prerun.js",
     "discover": "node src/discover-api.js",
-    "apply": "node src/index.js"
+    "discover:builtin": "node src/discover-builtin.js",
+    "discover:hn": "node src/discover-hn.js",
+    "discover:feeds": "node src/discover-aggregators.js",
+    "discover:community": "node src/discover-community.js",
+    "preapply": "node src/prerun.js",
+    "apply": "node src/index.js",
+    "refine-helper": "node src/refine-helper.js",
+    "test": "node --test \"tests/*.test.js\"",
+    "check": "node --check src/cli.js && node --check src/index.js && node --check src/core/ledger.js && node --check src/core/score.js && node --check src/core/canonical.js && node --check src/core/autonomy.js && node --check src/core/secret-store.js && node --check src/core/queues.js && node --check src/core/rounds.js && node --check src/core/sources.js && node --check src/core/migrate.js && node --check src/feeds.js && node --check src/util/eligibility.js && node --check src/discover-api.js && node --check src/discover-aggregators.js && node --check src/discover-community.js",
+    "agent": "node bin/apply-agent.js",
+    "migrate": "node bin/apply-agent.js migrate",
+    "review": "node bin/apply-agent.js ledger review",
+    "privacy-audit": "node scripts/privacy-audit.js",
+    "privacy-audit:strict": "node scripts/privacy-audit.js --strict"
   },
   "dependencies": {
     "playwright": "^1.50.0",
     "@playwright/test": "^1.50.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "apply-agent": "bin/apply-agent.js"
   }
 }

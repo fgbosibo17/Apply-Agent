@@ -1,8 +1,17 @@
 // Debug probe: open a Greenhouse job, fetch its schema, and report how each
 // schema field maps to the live DOM (type, required, options, whether fillable).
-// Usage: PERSONA=primary node src/dbg-greenhouse.js <greenhouse-url>
+// Usage: PERSONA=qa node src/dbg-greenhouse.js <greenhouse-url>
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { chromium } = require('playwright');
 const { fetchJson } = require('./ats-apis');
+
+// Headless schema probe — needs no logged-in session, so it runs in an OS temp
+// dir the system reclaims. It used to write into a repo-level
+// 'browser-profile-discovery' directory, which is one of the profiles this
+// consolidation removed.
+const TMP_PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'qajob-dbg-gh-'));
 
 const URL = process.argv[2];
 if (!URL) { console.error('pass a greenhouse url'); process.exit(1); }
@@ -23,7 +32,7 @@ function parseGh(url) {
     }
   }
 
-  const ctx = await chromium.launchPersistentContext('./browser-profile-discovery', { headless: true });
+  const ctx = await chromium.launchPersistentContext(TMP_PROFILE, { headless: true });
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(1500);

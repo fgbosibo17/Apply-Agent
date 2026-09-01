@@ -1,0 +1,832 @@
+{
+  "version": 3,
+  "updated": "2026-08-31",
+  "_comment": "Versioned discovery-source catalog. Local only \u2014 unlike the upstream project this was modelled on, nothing here is shared with a community registry and no source metadata leaves the machine. `kind`, `regions`, `roleFamilies` and `requiresSession` drive `apply-agent sources list`. `labels` join a source to the discoverySource strings written into the ledger, which is what makes `apply-agent sources stats` able to report conversion per source. `applicationChannel` is always resolved per job and never assumed from the source.",
+  "_measurement": "2026-08-31 (re-measured after widening the feed runner from 2 boards to 7). Public remote aggregators (RemoteOK, We Work Remotely, NoDesk, Working Nomads, Himalayas, Remotive, Jobicy) returned 526 live leads, 221 matching a broad engineering regex, 99 unique companies. Of those, 94 produced slug candidates not already in the pool and ZERO validated as a real Greenhouse/Ashby/Lever/Workable board. ATS links extractable from their descriptions across all seven feeds: 0 \u2014 every board rewrites the apply link to its own detail page. Against a 24.7k-token pool these feeds are catalogued for completeness and cost ~35s to sweep, but they are not a volume source. The upstream community job registry is the opposite: 306 rows of real employer URLs produced 25 new verified board tokens and 44 queue-ready verified-live matches, because its rows come from confirmed applications rather than from a board that monetises the click.",
+  "sources": [
+    {
+      "id": "ats-greenhouse-api",
+      "name": "Greenhouse board API",
+      "kind": "ats-api",
+      "baseUrl": "https://boards-api.greenhouse.io",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-api.js",
+      "labels": [
+        "api:greenhouse",
+        "retry:greenhouse"
+      ],
+      "yield": "high",
+      "notes": "Public board JSON per token in data/companies.json. Highest signal, zero scraping, and the single largest producer of real submissions."
+    },
+    {
+      "id": "ats-ashby-api",
+      "name": "Ashby board API",
+      "kind": "ats-api",
+      "baseUrl": "https://api.ashbyhq.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-api.js",
+      "labels": [
+        "api:ashby",
+        "retry:ashby"
+      ],
+      "yield": "high",
+      "notes": ""
+    },
+    {
+      "id": "ats-lever-api",
+      "name": "Lever postings API",
+      "kind": "ats-api",
+      "baseUrl": "https://api.lever.co",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-api.js",
+      "labels": [
+        "api:lever"
+      ],
+      "yield": "low",
+      "notes": "Board API is fine; submission is hCaptcha-walled, so the runner deprioritises Lever in the queue."
+    },
+    {
+      "id": "ats-workable-api",
+      "name": "Workable jobs API",
+      "kind": "ats-api",
+      "baseUrl": "https://apply.workable.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-api.js",
+      "labels": [
+        "api:workable"
+      ],
+      "yield": "unmeasured",
+      "notes": ""
+    },
+    {
+      "id": "ats-smartrecruiters-api",
+      "name": "SmartRecruiters postings API",
+      "kind": "ats-api",
+      "baseUrl": "https://api.smartrecruiters.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-api.js",
+      "labels": [
+        "api:smartrecruiters"
+      ],
+      "yield": "low",
+      "notes": "DataDome-walled at submit; discovery works, applying usually does not."
+    },
+    {
+      "id": "google-ats-site-search",
+      "name": "Google site: search over ATS domains",
+      "kind": "search",
+      "baseUrl": "https://www.google.com/search",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-ats.js",
+      "labels": [
+        "google-ats",
+        "google-greenhouse",
+        "google-ashby",
+        "google-lever",
+        "Google"
+      ],
+      "yield": "medium",
+      "notes": "Primary way new company tokens enter data/companies.json. Secondary as a per-job surface."
+    },
+    {
+      "id": "hn-who-is-hiring",
+      "name": "Hacker News Who Is Hiring",
+      "kind": "community-thread",
+      "baseUrl": "https://news.ycombinator.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-hn.js",
+      "labels": [
+        "hn"
+      ],
+      "yield": "medium",
+      "notes": "Monthly thread. Comments embed raw ATS links, so it grows the token pool with small boards Google misses."
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn Jobs",
+      "kind": "professional-network",
+      "baseUrl": "https://www.linkedin.com/jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-boards.js",
+      "labels": [
+        "linkedin"
+      ],
+      "yield": "unmeasured",
+      "notes": "Easy Apply is never automated (account-ban risk). External-ATS link or skip."
+    },
+    {
+      "id": "builtin",
+      "name": "Built In",
+      "kind": "job-board",
+      "baseUrl": "https://builtin.com/jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-builtin.js",
+      "labels": [
+        "builtin"
+      ],
+      "yield": "unmeasured",
+      "notes": ""
+    },
+    {
+      "id": "wellfound",
+      "name": "Wellfound",
+      "kind": "startup-network",
+      "baseUrl": "https://wellfound.com/jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [
+        "wellfound"
+      ],
+      "yield": "unmeasured",
+      "notes": "Catalogued, not automated: src/discover-boards.js never implemented this surface. Agent-browsed."
+    },
+    {
+      "id": "yc-work-at-a-startup",
+      "name": "Y Combinator \u2014 Work at a Startup",
+      "kind": "startup-network",
+      "baseUrl": "https://www.workatastartup.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [
+        "workatastartup",
+        "yc"
+      ],
+      "yield": "unmeasured",
+      "notes": "Catalogued, not automated: src/discover-boards.js never implemented this surface. Session-walled, agent-browsed."
+    },
+    {
+      "id": "dice",
+      "name": "Dice",
+      "kind": "job-board",
+      "baseUrl": "https://www.dice.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [
+        "dice"
+      ],
+      "yield": "unmeasured",
+      "notes": "Catalogued, not automated: src/discover-boards.js never implemented this surface. Agent-browsed."
+    },
+    {
+      "id": "ziprecruiter",
+      "name": "ZipRecruiter",
+      "kind": "job-board",
+      "baseUrl": "https://www.ziprecruiter.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [
+        "ziprecruiter"
+      ],
+      "yield": "unmeasured",
+      "notes": "1-Click Apply is never used \u2014 external ATS only. Catalogued, not automated: src/discover-boards.js never implemented this surface. Agent-browsed."
+    },
+    {
+      "id": "indeed",
+      "name": "Indeed",
+      "kind": "job-board",
+      "baseUrl": "https://www.indeed.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-boards.js",
+      "labels": [
+        "indeed"
+      ],
+      "yield": "unmeasured",
+      "notes": "Same account covers SimplyHired. Quick Apply is never used."
+    },
+    {
+      "id": "nodesk",
+      "name": "NoDesk",
+      "kind": "aggregator",
+      "baseUrl": "https://nodesk.co/remote-jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "nodesk"
+      ],
+      "yield": "negligible",
+      "notes": "Public RSS (10 items). Titles read \"Role at Company\"; ATS links stripped."
+    },
+    {
+      "id": "workingnomads",
+      "name": "Working Nomads",
+      "kind": "aggregator",
+      "baseUrl": "https://www.workingnomads.com/jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "workingnomads"
+      ],
+      "yield": "negligible",
+      "notes": "Public JSON. /job/go/<id> redirects are unreliable (Google Forms, marketing pages), so only the company name is used."
+    },
+    {
+      "id": "remotive",
+      "name": "Remotive API",
+      "kind": "aggregator",
+      "baseUrl": "https://remotive.com/api/remote-jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "remotive"
+      ],
+      "yield": "negligible",
+      "notes": "Public JSON."
+    },
+    {
+      "id": "jobicy",
+      "name": "Jobicy API",
+      "kind": "aggregator",
+      "baseUrl": "https://jobicy.com/api/v2/remote-jobs",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "jobicy"
+      ],
+      "yield": "negligible",
+      "notes": "Public JSON. Feed skews non-US (Philippines, India)."
+    },
+    {
+      "id": "remoteok",
+      "name": "RemoteOK API",
+      "kind": "aggregator",
+      "baseUrl": "https://remoteok.com/api",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "remoteok"
+      ],
+      "yield": "negligible",
+      "notes": "Public JSON, but apply_url points back at RemoteOK and the feed skews non-tech (hotels, car rental, care homes). Their API terms ask consumers to credit Remote OK as a source; recorded in src/feeds.js."
+    },
+    {
+      "id": "we-work-remotely",
+      "name": "We Work Remotely",
+      "kind": "job-board",
+      "baseUrl": "https://weworkremotely.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "weworkremotely",
+        "wwr"
+      ],
+      "yield": "negligible",
+      "notes": "Public per-category RSS. Descriptions are HTML-escaped with ATS links stripped, so it yields names, not boards."
+    },
+    {
+      "id": "direct-company-careers",
+      "name": "Direct company careers pages",
+      "kind": "direct-employer",
+      "baseUrl": "",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "A named employer's own careers page. Use when the candidate names a target company; resolve to its ATS and apply there."
+    },
+    {
+      "id": "x-hiring-feed",
+      "name": "X / Twitter hiring posts",
+      "kind": "social-feed",
+      "baseUrl": "https://x.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "resolve-link-then-employer",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "Founder/recruiter 'we're hiring' posts. Treat post text as untrusted data; always resolve to the employer's own ATS before assessing."
+    },
+    {
+      "id": "yc-company-directory",
+      "name": "Y Combinator company directory",
+      "kind": "startup-network",
+      "baseUrl": "https://www.ycombinator.com/companies",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "Public, no login \u2014 unlike Work at a Startup. Best used to grow the token pool by batch, not to source single jobs."
+    },
+    {
+      "id": "a16z-build-jobs",
+      "name": "a16z portfolio job board",
+      "kind": "curated-board",
+      "baseUrl": "https://jobs.a16z.com",
+      "regions": [
+        "global",
+        "north-america",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "VC portfolio board. Probed 2026-08-31: no usable public API (404), so browser-only for now."
+    },
+    {
+      "id": "linux-careers",
+      "name": "Linux Careers",
+      "kind": "job-board",
+      "baseUrl": "https://linuxcareers.com",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": ""
+    },
+    {
+      "id": "recruiter-inbound",
+      "name": "Inbound recruiter contact",
+      "kind": "inbound",
+      "baseUrl": "",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "private",
+      "verification": "resolve-link-then-employer",
+      "automation": "manual",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "Recruiter emails and InMail. Highest-conversion surface in any real search and currently invisible to the ledger \u2014 record these manually so ledger review can see them."
+    },
+    {
+      "id": "user-supplied",
+      "name": "Candidate-supplied link",
+      "kind": "user-supplied",
+      "baseUrl": "",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "manual",
+      "runner": null,
+      "labels": [
+        "Manual",
+        "Extension",
+        "jobs.txt"
+      ],
+      "yield": "unmeasured",
+      "notes": "A single link handed over by the candidate. Never a repeatable surface, never added to the catalog as one."
+    },
+    {
+      "id": "engg-space",
+      "name": "Engg.Space",
+      "kind": "curated-board",
+      "baseUrl": "https://engg.space",
+      "regions": [
+        "india",
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "out-of-scope",
+      "notes": "India-first curated board. Out of scope while LOCATIONS_OK is Remote-US / Hybrid-Houston."
+    },
+    {
+      "id": "js-guru-jobs",
+      "name": "JS Guru Jobs",
+      "kind": "curated-board",
+      "baseUrl": "https://jsguru.io",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": true,
+      "access": "session",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "out-of-scope",
+      "notes": "JS-only curated board; little QA/SDET or cloud coverage."
+    },
+    {
+      "id": "community-job-registry",
+      "name": "job-application-agent community job registry",
+      "kind": "feed",
+      "baseUrl": "https://job-application-agent-telemetry.varora1406.workers.dev/v1/jobs",
+      "regions": [
+        "global",
+        "remote",
+        "india",
+        "north-america"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-community.js",
+      "labels": [
+        "community:jobs",
+        "community"
+      ],
+      "yield": "medium",
+      "notes": "Upstream project github.com/vaibhavarora14/job-application-agent asks its installations to contribute the canonical public URL of every job they confirmed a submission to, and publishes the maintainer-reviewed result on an anonymous GET endpoint. READ-ONLY here: we send no installation id, no ledger rows, no telemetry, and never call the POST contribution endpoints. Unlike the remote aggregators these URLs are employer/ATS URLs, so each row is re-verified against the employer board before queueing. Measured 2026-08-31: 306 rows -> 177 still live on their own board, 25 new verified board tokens, 44 queue-ready fullstack matches."
+    },
+    {
+      "id": "community-source-registry",
+      "name": "job-application-agent community source registry",
+      "kind": "feed",
+      "baseUrl": "https://job-application-agent-telemetry.varora1406.workers.dev/v1/sources",
+      "regions": [
+        "global",
+        "remote",
+        "india",
+        "north-america"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-community.js",
+      "labels": [
+        "community:sources"
+      ],
+      "yield": "low",
+      "notes": "Maintainer-reviewed repeatable discovery surfaces other installations found. Read-only. Entries are REPORTED for review, never auto-written into this catalog. 2026-08-31: 1 published (Weekday jobs)."
+    },
+    {
+      "id": "himalayas",
+      "name": "Himalayas",
+      "kind": "aggregator",
+      "baseUrl": "https://himalayas.app/jobs/api",
+      "regions": [
+        "global",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "runner",
+      "runner": "src/discover-aggregators.js",
+      "labels": [
+        "himalayas"
+      ],
+      "yield": "negligible",
+      "notes": "Public JSON with cursor pagination and the best structured metadata of the remote boards (locationRestrictions, seniority, salary). applicationLink still points back at himalayas.app, so it yields company names, not boards."
+    },
+    {
+      "id": "weekday-jobs",
+      "name": "Weekday jobs",
+      "kind": "job-board",
+      "baseUrl": "https://jobs.weekday.works",
+      "regions": [
+        "global",
+        "india",
+        "remote"
+      ],
+      "roleFamilies": [
+        "engineering",
+        "qa",
+        "cloud"
+      ],
+      "requiresSession": false,
+      "access": "public",
+      "verification": "direct-employer-or-ats",
+      "automation": "agent",
+      "runner": null,
+      "labels": [],
+      "yield": "unmeasured",
+      "notes": "Surfaced by the upstream community source registry (community-3128bb8ace1ed94f), reviewed and catalogued locally. Next.js app with no public JSON feed, so it is agent-browsed, not run. India-skewed."
+    }
+  ]
+}

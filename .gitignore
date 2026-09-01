@@ -38,17 +38,30 @@ Resume/*.docx
 ats-accounts.txt
 scheduled-runs.log
 
+# Local env overrides (optional helper config). No secrets are required — the
+# refine helper uses the claude CLI, not an API key — but ignore .env anyway.
+.env
+.env.*
+!.env.example
+
 # Generated cover letters (per-job, per-user)
 cover-letters/*.txt
 cover-letters/*.md
 !cover-letters/.gitkeep
 
 # Persistent browser profiles — contain LinkedIn cookies, Google session,
-# ATS logins. NEVER commit (anyone could log in as you). Covers every per-persona
-# profile folder (browser-profile-<persona>) + any snapshots/backups.
+# ATS logins. NEVER commit. Base folder tracked via .gitkeep.
+# Covers every per-identity profile + backups:
+#   browser-profile-<persona>   one per persona, derived in src/personas.js
+# Nothing else should appear here — an invented profile name is how this repo
+# once accumulated 23 profile directories and 5 GB of disk.
+#   *.saved / *.bak snapshots
 browser-profile/*
 !browser-profile/.gitkeep
 browser-profile-*/
+
+# Quarantined orphan profiles awaiting deletion (see .profile-archive/README.txt)
+.profile-archive/
 
 # Playwright MCP scratch
 .playwright-mcp/
@@ -61,6 +74,15 @@ browser-profile-*/
 *.jpeg
 *.jpg
 
+# Run artifacts. These now land in .state/runs/ (owner-only 0700) via
+# src/core/paths.js, but SCRATCH can still redirect batch logs here, and these
+# files carry PII: a batch log opens with "Persona: <name> <email>" and then lists
+# every job URL evaluated. Previously untracked AND unignored, so a `git add -A`
+# would have committed them.
+*-nbatch-*.log
+*-batch-*.log
+dryrun-*.png
+
 # Local recovery backups created during runs (not the source of truth — the live
 # seen-jobs.csv / applications-log.csv are). Keep the repo clean of these.
 *.bak.csv
@@ -68,23 +90,24 @@ browser-profile-*/
 *.backup2.csv
 *.backup.json
 *.bak.json
+# Ad-hoc snapshot names slipped the patterns above — seen-jobs.retrybak.csv was
+# tracked with 1,953 real rows because it matches neither *.bak.csv nor
+# *.backup.csv. Catch any bak/backup snapshot of the history files.
+*bak*.csv
+*bak*.json
+*backup*.csv
+*backup*.json
+*.bak-*
+.DS_Store
 dryrun-*.txt
 
-# Per-persona job queues (runtime output of discover-api.js — your job list)
-queue-*.json
-queue.json
-*.json.bak
-
-# Reviewed answers written by the fill/review pipeline — contains your PII
-# (name, contact, address, answers). NEVER commit.
-data/verified-answers.json
-
-# Learned answers accumulated at runtime (may contain personal answers)
-data/learned-answers.json
-
-# macOS / Claude Code local artifacts
-.DS_Store
+# Claude Code skills — the apply-agent skill lives in ~/.claude/skills (personal,
+# account-level) because it carries REAL identity data (names, emails, phones,
+# resume paths). This repo is public: never commit a skill directory here.
 .claude/
 
-# Extension: real persona data (copy personas.example.js). Never commit PII.
-extension/personas.js
+# Owner-only agent state: NDJSON ledgers, attention/friction queues, rounds,
+# autonomy grants, and the file-backed profile fallback. Contains real
+# application history — never commit.
+.state/
+data/agent-config.json

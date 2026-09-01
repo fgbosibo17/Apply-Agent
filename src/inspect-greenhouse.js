@@ -2,7 +2,7 @@
 // failures. Reports: redirected URL, iframe presence, form-field counts in main frame
 // vs each iframe, submit buttons, and required labels.
 //
-//   PERSONA=primary node src/inspect-greenhouse.js <url>
+//   PERSONA=cloud node src/inspect-greenhouse.js <url>
 
 const { chromium } = require('playwright');
 const answers = require('./answers');

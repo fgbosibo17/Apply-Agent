@@ -23,8 +23,8 @@ async function applyAshby(page, jobMeta) {
       && !/United States|US Remote|Americas|North America|Remote, US|Remote \(US/i.test(pageText)) {
     return { status: 'Skipped', reason: 'Non-US location' };
   }
-  if (/active\s+(secret|TS\/SCI|clearance)/i.test(pageText)) {
-    return { status: 'Skipped', reason: 'Requires active security clearance' };
+  if (/US Citizen(?:ship)?\s+required|active\s+(secret|TS\/SCI|clearance)/i.test(pageText)) {
+    return { status: 'Skipped', reason: 'Requires US citizenship or active clearance' };
   }
 
   // ── Resume upload (autofills name/email on Ashby) ──
@@ -45,42 +45,55 @@ async function applyAshby(page, jobMeta) {
     if (p && !(await p.inputValue().catch(() => ''))) { await p.fill(a.phoneDigits).catch(() => {}); break; }
   }
 
-  // ── Location (Ashby uses a text/autocomplete field labeled "Location") ──
-  await fillLocation(page, page, a).catch(() => {});
+  // Ashby renders custom questions PROGRESSIVELY (after the system fields / a
+  // beat after resume-parse), so a single fill pass misses late-loading required
+  // fields → "missing required field" validation errors. Run the mapped-fill
+  // sequence over a few rounds, re-scanning each time; already-filled fields are
+  // skipped (every sub-step checks value/checked first, so this is idempotent).
+  for (let round = 0; round < 3; round++) {
+    // ── Location (Ashby uses a text/autocomplete field labeled "Location") ──
+    await fillLocation(page, page, a).catch(() => {});
 
-  // ── Custom text inputs (UUID names) by label ──
-  for (const inp of await page.$$('input[type="text"]')) {
-    if (!(await inp.isVisible().catch(() => false))) continue;
-    if (await inp.inputValue().catch(() => '')) continue;
-    const label = await labelOf(inp);
-    if (/location|where.*(based|located)/i.test(label)) continue; // handled by fillLocation
-    // Yes/No questions sometimes render as a text field on Ashby → answer literally.
-    const val = textValueForLabel(label, a);
-    if (val) { await inp.fill(String(val).slice(0, 500)).catch(() => {}); continue; }
-    if (/authoriz|eligible to work|legally/i.test(label)) await inp.fill('Yes').catch(() => {});
-    else if (/sponsor/i.test(label)) await inp.fill('No').catch(() => {});
-    else if (/hybrid|onsite|in.?office|open to working/i.test(label)) await inp.fill('Yes').catch(() => {});
+    // ── Custom text inputs (UUID names) by label ──
+    for (const inp of await page.$$('input[type="text"]')) {
+      if (!(await inp.isVisible().catch(() => false))) continue;
+      if (await inp.inputValue().catch(() => '')) continue;
+      const role = await inp.getAttribute('role').catch(() => '');
+      if (role === 'combobox') continue; // searchable dropdown → handleAshbyDropdowns
+      const label = await labelOf(inp);
+      if (/location|where.*(based|located)/i.test(label)) continue; // handled by fillLocation
+      // Yes/No questions sometimes render as a text field on Ashby → answer literally.
+      const val = textValueForLabel(label, a);
+      if (val) { await inp.fill(String(val).slice(0, 500)).catch(() => {}); continue; }
+      if (/authoriz|eligible to work|legally/i.test(label)) await inp.fill('Yes').catch(() => {});
+      else if (/sponsor/i.test(label)) await inp.fill('No').catch(() => {});
+      else if (/hybrid|onsite|in.?office|open to working/i.test(label)) await inp.fill('Yes').catch(() => {});
+    }
+
+    // ── Essays / open-text (textarea) by label ──
+    for (const t of await page.$$('textarea')) {
+      const name = await t.getAttribute('name').catch(() => '');
+      if (name === 'g-recaptcha-response') continue;
+      if (!(await t.isVisible().catch(() => false))) continue;
+      if (await t.inputValue().catch(() => '')) continue;
+      const label = await labelOf(t);
+      if (/cover letter|additional information/i.test(label) && !/\*/.test(label)) continue;
+      // A mapped value (LinkedIn URL, salary, start date, etc.) can render as a
+      // TEXTAREA on Ashby — use it before falling back to a generated essay.
+      const ans = textValueForLabel(label, a) || generateAnswer(label, a);
+      if (ans) await t.fill(ans).catch(() => {});
+    }
+
+    // ── Radio groups (sponsorship, EEO, Yes/No, "how did you hear") ──
+    await handleRadioGroups(page);
+
+    // ── Ashby custom dropdowns / Yes-No <button> toggles ──
+    await handleAshbyButtons(page);
+    await handleAshbyDropdowns(page);
+    await handleNativeSelects(page);
+
+    if (round < 2) await page.waitForTimeout(1000);
   }
-
-  // ── Essays / open-text (textarea) by label ──
-  for (const t of await page.$$('textarea')) {
-    const name = await t.getAttribute('name').catch(() => '');
-    if (name === 'g-recaptcha-response') continue;
-    if (!(await t.isVisible().catch(() => false))) continue;
-    if (await t.inputValue().catch(() => '')) continue;
-    const label = await labelOf(t);
-    if (/cover letter|additional information/i.test(label) && !/\*/.test(label)) continue;
-    const ans = generateAnswer(label, a);
-    if (ans) await t.fill(ans).catch(() => {});
-  }
-
-  // ── Radio groups (sponsorship, EEO, Yes/No) ──
-  await handleRadioGroups(page);
-
-  // ── Ashby custom dropdowns / Yes-No <button> toggles ──
-  await handleAshbyButtons(page);
-  await handleAshbyDropdowns(page);
-  await handleNativeSelects(page);
 
   // ── Safety net: fill any remaining required field a custom question missed ──
   await fillRemainingRequired(page);
@@ -113,10 +126,22 @@ async function applyAshby(page, jobMeta) {
 
   // No validation error → wait for the success state (invisible reCAPTCHA can take ~30s).
   if (await confirmAfterSubmit(page, page, {
-    re: /your application.*(was )?(successfully )?submitted|application (was )?(successfully )?(submitted|received)|we will (be in touch|review your application|contact you)|thank you for applying/i,
+    re: /your application.*(was )?(successfully )?submitted|application (was )?(successfully )?(submitted|received)|thank you for (applying|your (application|interest))|we('| ha)ve received your application|we will (be in touch|review your application|contact you)|successfully submitted|submission (received|complete)/i,
     rounds: 14, waitMs: 2500,
   })) {
     return { status: 'Applied', reason: '—' };
+  }
+  // Robust fallback (matches the Greenhouse approach): Ashby frequently REPLACES
+  // the form with a success card whose exact wording we don't match, which was
+  // causing real submits to be logged as "No success message". If there is no
+  // validation error AND the application form is gone (no name field, no Submit
+  // button), the submit succeeded.
+  const stillOnForm = await page.$('input#_systemfield_name, input[name="_systemfield_name"]').then(Boolean).catch(() => false);
+  const submitStill = await page.$('button:has-text("Submit Application"), button:has-text("Submit application")').then(Boolean).catch(() => false);
+  const errNow = await page.$$eval('[role="alert"], [class*="error"]', els =>
+    els.map(e => (e.innerText || '').trim()).find(t => /needs corrections|missing entry|required field|couldn.?t submit|could not submit|please (correct|complete|enter|fix)/i.test(t)) || '').catch(() => '');
+  if (!stillOnForm && !submitStill && !errNow) {
+    return { status: 'Applied', reason: 'form replaced after submit' };
   }
   const errors = await page.$$eval('[role="alert"], [class*="error"]', els => els.map(e => e.innerText).filter(Boolean).join(' | ').slice(0, 200)).catch(() => '');
   return { status: 'Error', reason: errors ? 'Validation: ' + errors : 'No success message detected' };
@@ -170,7 +195,21 @@ async function handleAshbyDropdowns(page) {
     if (seed) { await cb.type(seed, { delay: 30 }).catch(() => {}); await page.waitForTimeout(500); }
     let opts = await page.$$eval('[role="option"], li[role="option"], [class*="option"]', (els) => els.filter((e) => e.offsetParent !== null).map((e) => e.textContent.trim()).filter(Boolean)).catch(() => []);
     if (!opts.length) { await page.keyboard.press('Escape').catch(() => {}); continue; }
-    const pick = optionForLabel(label, opts, a) || (seed && opts.find((o) => new RegExp(seed, 'i').test(o))) || (opts.length === 1 ? opts[0] : null);
+    let pick = optionForLabel(label, opts, a) || (seed && opts.find((o) => new RegExp(seed, 'i').test(o))) || (opts.length === 1 ? opts[0] : null);
+    // Required dropdown we couldn't map (e.g. an unusual "How did you hear",
+    // team/dept picker) → pick the first real option so it doesn't block submit.
+    // Skip EEO/self-ID + pronoun fields (never random-pick a sensitive value).
+    if (!pick) {
+      // Ashby marks required via a label asterisk more often than aria-required,
+      // so treat an asterisk in the field label as required too — otherwise a
+      // genuinely-required unmapped dropdown (Source, education, team) is left
+      // empty and blocks submit.
+      const required = await cb.evaluate((e) => e.required || e.getAttribute('aria-required') === 'true').catch(() => false)
+        || /\*/.test(label);
+      const blob = (label + ' ' + opts.join(' ')).toLowerCase();
+      const sensitive = /gender|\brace\b|ethnic|veteran|disab|hispanic|latino|sexual orientation|transgender|pronoun|salary|compensation/.test(blob);
+      if (required && !sensitive) pick = opts.find((o) => o.trim() && !/^\s*(select|choose|please|--)/i.test(o));
+    }
     if (!pick) { await page.keyboard.press('Escape').catch(() => {}); continue; }
     const chose = await page.evaluate((p) => {
       const els = Array.from(document.querySelectorAll('[role="option"], li[role="option"], [class*="option"]')).filter((e) => e.offsetParent !== null);
