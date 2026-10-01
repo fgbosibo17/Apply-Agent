@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Step-by-step guide to run Apply Agent nightly on an Ubuntu server and control it from your laptop over Tailscale.">
+<title>Apply Agent Server Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: one reading column (~760px) with a fill-in panel up top; numbered steps are a real sequence. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --sunk: #eceff3;
+  --fg: #17202b;
+  --muted: #5a6574;
+  --line: #d6dce4;
+  --line-strong: #9aa5b3;
+  --accent: #3346c8;       /* Tailscale / private-network elements, links */
+  --accent-soft: #e7eafb;
+  --warn: #a5560b;         /* anything that sends real applications */
+  --warn-soft: #fbefe2;
+  --ok: #1d7347;
+  --ok-soft: #e3f3ea;
+  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans", "Arial Narrow", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #161d26; --sunk: #1d2631; --fg: #e5e9ef; --muted: #9ba6b4;
+    --line: #2a3441; --line-strong: #4b5768; --accent: #95a2ff; --accent-soft: #1d2348;
+    --warn: #f0a24a; --warn-soft: #33240f; --ok: #5cc98d; --ok-soft: #12291c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #161d26; --sunk: #1d2631; --fg: #e5e9ef; --muted: #9ba6b4;
+  --line: #2a3441; --line-strong: #4b5768; --accent: #95a2ff; --accent-soft: #1d2348;
+  --warn: #f0a24a; --warn-soft: #33240f; --ok: #5cc98d; --ok-soft: #12291c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 800px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 80px; }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; text-wrap: balance; }
+h1 { font-size: clamp(2rem, 5vw, 2.8rem); font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
+h2 { font-size: 1.65rem; font-weight: 700; margin: 56px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.2rem; font-weight: 600; margin: 28px 0 8px; }
+p, li { max-width: 68ch; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lede { font-size: 1.12rem; color: var(--muted); margin: 0 0 24px; max-width: 62ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+code { font-family: var(--font-mono); font-size: 0.9em; background: var(--sunk); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+kbd { font-family: var(--font-mono); font-size: 0.85em; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+
+/* fill-in panel */
+.fill { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 14px; }
+.fill h2 { margin: 0; padding: 0; border: 0; font-size: 1.15rem; }
+.fill p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.fields label { display: grid; gap: 4px; font-size: 0.85rem; font-weight: 600; min-width: 0; }
+.fields input { font: 500 0.95rem var(--font-mono); padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
+.fields small { font-weight: 400; color: var(--muted); }
+
+/* contents */
+.toc { margin: 28px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; font-size: 0.95rem; }
+.toc a { text-decoration: none; color: var(--fg); display: block; padding: 3px 0; border-bottom: 1px dotted var(--line); }
+.toc a:hover { color: var(--accent); }
+.toc .n { font-family: var(--font-mono); color: var(--muted); display: inline-block; min-width: 2.2em; font-size: 0.85em; }
+
+/* commands */
+.cmd { margin: 14px 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line); background: var(--sunk); }
+.where { font: 600 0.72rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+.where::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+.cmd[data-where="laptop"] .where::before { background: var(--accent); }
+.cmd[data-where="server"] .where::before { background: var(--ok); }
+.cmd[data-where="live"] { border-color: var(--warn); }
+.cmd[data-where="live"] .cmd-head { background: var(--warn-soft); }
+.cmd[data-where="live"] .where { color: var(--warn); }
+.cmd[data-where="live"] .where::before { background: var(--warn); }
+.copy { font: 500 0.78rem var(--font-ui); border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.copy:hover { border-color: var(--accent); color: var(--accent); }
+.cmd pre { margin: 0; padding: 12px 14px; overflow-x: auto; font: 0.86rem/1.55 var(--font-mono); }
+.cmd pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.cmd .note { padding: 0 14px 12px; margin: 0; font-size: 0.88rem; color: var(--muted); }
+
+/* callouts */
+.callout { border-left: 3px solid var(--line-strong); background: var(--surface); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+.callout p { margin: 0; }
+.callout p + p { margin-top: 8px; }
+.callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+.callout.ok { border-color: var(--ok); background: var(--ok-soft); }
+.callout.net { border-color: var(--accent); background: var(--accent-soft); }
+.callout strong:first-child { font-family: var(--font-display); font-size: 1.02rem; }
+
+/* steps */
+.step-title { display: flex; align-items: baseline; gap: 12px; }
+.step-no { font: 600 0.95rem var(--font-mono); color: var(--accent); flex: none; }
+.time { font: 400 0.82rem var(--font-mono); color: var(--muted); margin: -4px 0 12px; }
+
+/* tables */
+.tbl { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 0.78rem var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--sunk); }
+td code { white-space: nowrap; }
+td.wrap code { white-space: normal; }
+
+/* checklist */
+.check { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; }
+.check li { padding-left: 28px; position: relative; }
+.check li::before { content: ""; position: absolute; left: 2px; top: 6px; width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 3px; }
+
+/* diagrams */
+figure { margin: 22px 0 28px; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; }
+.dg { display: block; width: 100%; min-width: 560px; height: auto; color: var(--fg); font-family: var(--font-ui); }
+.dg.narrow { min-width: 0; max-width: 620px; margin: 0 auto; }
+.dg .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+.dg .box.inner { fill: var(--sunk); stroke: var(--line); }
+.dg .box.live { stroke: var(--warn); fill: var(--warn-soft); }
+.dg .box.dry { stroke: var(--ok); fill: var(--ok-soft); }
+.dg .group { fill: none; stroke: var(--line-strong); stroke-dasharray: 5 4; stroke-width: 1.2; }
+.dg .t { fill: currentColor; font-size: 13px; font-weight: 600; }
+.dg .s { fill: var(--muted); font-size: 11.5px; }
+.dg .m { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.dg .lab { fill: var(--muted); font-size: 11px; }
+.dg .cap { fill: var(--muted); font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; }
+.dg .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.dg .ah { fill: var(--muted); }
+.dg .net { stroke: var(--accent); }
+.dg .net-t { fill: var(--accent); }
+.dg .net-f { fill: var(--accent); }
+.dg .net-band { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.dg .live-t { fill: var(--warn); }
+.dg .ok-t { fill: var(--ok); }
+figcaption { font-size: 0.9rem; color: var(--muted); margin-top: 8px; max-width: 68ch; }
+
+dl.gloss { display: grid; grid-template-columns: minmax(110px, 160px) 1fr; gap: 8px 18px; margin: 14px 0; }
+dl.gloss dt { font-weight: 600; font-family: var(--font-display); }
+dl.gloss dd { margin: 0; min-width: 0; }
+@media (max-width: 560px) { dl.gloss { grid-template-columns: 1fr; } dl.gloss dd { margin-bottom: 8px; } }
+
+.footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.9rem; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <p class="eyebrow">Apply Agent · server guide</p>
+  <h1>Apply Agent Server Setup</h1>
+  <p class="lede">You're putting a job-application agent on a computer at home that runs every night on its own. You'll control it from your laptop over Tailscale and get a summary on your phone in the morning. This guide assumes you've never done any of it before: every command is here, and it says where to type it.</p>
+
+  <section class="fill" aria-labelledby="fill-h">
+    <h2 id="fill-h">Fill in your names first</h2>
+    <p>Type these once. Every command on this page updates to match, so you can copy and paste without editing.</p>
+    <div class="fields">
+      <label for="f-user">Your login name on the server<input id="f-user" data-key="USER" value="you" autocomplete="off" spellcheck="false"><small>the user you create when installing Ubuntu</small></label>
+      <label for="f-host">The server's Tailscale name<input id="f-host" data-key="HOST" value="jobserver" autocomplete="off" spellcheck="false"><small>what you'll call it in step 1</small></label>
+      <label for="f-persona">Your persona key<input id="f-persona" data-key="PERSONA" value="primary" autocomplete="off" spellcheck="false"><small>leave as <code>primary</code> unless you renamed it</small></label>
+    </div>
+  </section>
+
+  <nav aria-label="Contents">
+    <ol class="toc">
+      <li><a href="#picture"><span class="n">·</span>The big picture</a></li>
+      <li><a href="#how"><span class="n">·</span>How the agent works</a></li>
+      <li><a href="#night"><span class="n">·</span>What happens each night</a></li>
+      <li><a href="#need"><span class="n">·</span>What you need</a></li>
+      <li><a href="#s1"><span class="n">1</span>Install Ubuntu and Tailscale</a></li>
+      <li><a href="#s2"><span class="n">2</span>Connect from your laptop</a></li>
+      <li><a href="#s3"><span class="n">3</span>Install the tools</a></li>
+      <li><a href="#s4"><span class="n">4</span>Download the agent</a></li>
+      <li><a href="#s5"><span class="n">5</span>Build your persona</a></li>
+      <li><a href="#s6"><span class="n">6</span>Check the server is ready</a></li>
+      <li><a href="#s7"><span class="n">7</span>Log in to Google once</a></li>
+      <li><a href="#s8"><span class="n">8</span>Do a practice run</a></li>
+      <li><a href="#s9"><span class="n">9</span>Morning summary on your phone</a></li>
+      <li><a href="#s10"><span class="n">10</span>Put it on a schedule</a></li>
+      <li><a href="#s11"><span class="n">11</span>Control it from your laptop</a></li>
+      <li><a href="#s12"><span class="n">12</span>Update to a new version</a></li>
+      <li><a href="#trouble"><span class="n">·</span>When something goes wrong</a></li>
+      <li><a href="#rules"><span class="n">·</span>Rules that keep you safe</a></li>
+      <li><a href="#words"><span class="n">·</span>Words used in this guide</a></li>
+    </ol>
+  </nav>
+
+  <!-- ───────────────────────── PICTURE ───────────────────────── -->
+  <h2 id="picture">The big picture</h2>
+  <p>Three computers are involved. The <strong>server</strong> does all the work: it finds jobs, fills in applications in a real Chrome browser, and keeps a record of everything. Your <strong>laptop</strong> only talks to it, to set it up, check on it and stop it. Your <strong>phone</strong> gets a message when each night is done.</p>
+  <p>Tailscale is the private, encrypted link between your laptop and the server. It means you can reach the server from anywhere, home or away, without opening anything on your home router. The server still reaches job sites and Telegram over the normal internet.</p>
+
+  <figure>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 760 290" role="img" aria-label="Your laptop reaches the home server only through Tailscale using ssh and VNC. The server downloads the agent from GitHub, runs it every night from cron, applies on company job sites, and sends a summary to Telegram on your phone.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a1n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="net-f" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <!-- GitHub -->
+        <rect class="box" x="330" y="10" width="230" height="44" rx="7"/>
+        <text class="t" x="445" y="30" text-anchor="middle">GitHub</text>
+        <text class="m" x="445" y="46" text-anchor="middle">fgbosibo17/Apply-Agent</text>
+        <line class="edge" x1="445" y1="54" x2="445" y2="92" marker-end="url(#a1)"/>
+        <text class="lab" x="453" y="77">git clone · git pull when you update</text>
+        <!-- server -->
+        <rect class="box" x="330" y="94" width="230" height="180" rx="9"/>
+        <text class="t" x="445" y="116" text-anchor="middle">Home server · Ubuntu</text>
+        <rect class="box inner" x="350" y="128" width="190" height="32" rx="5"/>
+        <text class="s" x="445" y="148" text-anchor="middle">cron starts it every night</text>
+        <line class="edge" x1="445" y1="160" x2="445" y2="176" marker-end="url(#a1)"/>
+        <rect class="box inner" x="350" y="178" width="190" height="32" rx="5"/>
+        <text class="s" x="445" y="198" text-anchor="middle">nightly orchestrator</text>
+        <line class="edge" x1="445" y1="210" x2="445" y2="226" marker-end="url(#a1)"/>
+        <rect class="box inner" x="350" y="228" width="190" height="32" rx="5"/>
+        <text class="s" x="445" y="248" text-anchor="middle">real Chrome on a virtual screen</text>
+        <!-- laptop -->
+        <rect class="box" x="20" y="132" width="180" height="96" rx="9"/>
+        <text class="t" x="110" y="158" text-anchor="middle">Your laptop</text>
+        <text class="s" x="110" y="180" text-anchor="middle">ssh · VS Code</text>
+        <text class="s" x="110" y="198" text-anchor="middle">VNC viewer (once)</text>
+        <!-- tailscale band -->
+        <rect class="net-band" x="206" y="164" width="118" height="34" rx="17"/>
+        <line class="edge net" x1="214" y1="181" x2="316" y2="181" marker-start="url(#a1n)" marker-end="url(#a1n)"/>
+        <text class="t net-t" x="265" y="154" text-anchor="middle">Tailscale</text>
+        <text class="lab" x="265" y="216" text-anchor="middle">private, encrypted</text>
+        <!-- job sites -->
+        <rect class="box" x="612" y="106" width="136" height="70" rx="7"/>
+        <text class="t" x="680" y="130" text-anchor="middle">Company job sites</text>
+        <text class="s" x="680" y="148" text-anchor="middle">Greenhouse, Lever,</text>
+        <text class="s" x="680" y="164" text-anchor="middle">Workday, Ashby…</text>
+        <line class="edge" x1="560" y1="141" x2="610" y2="141" marker-end="url(#a1)"/>
+        <text class="lab" x="585" y="134" text-anchor="middle">applies</text>
+        <!-- telegram -->
+        <rect class="box" x="612" y="200" width="136" height="70" rx="7"/>
+        <text class="t" x="680" y="224" text-anchor="middle">Telegram</text>
+        <text class="s" x="680" y="242" text-anchor="middle">summary on</text>
+        <text class="s" x="680" y="258" text-anchor="middle">your phone</text>
+        <line class="edge" x1="560" y1="235" x2="610" y2="235" marker-end="url(#a1)"/>
+        <text class="lab" x="585" y="228" text-anchor="middle">reports</text>
+      </svg>
+    </div>
+    <figcaption>Tailscale only carries you ↔ server traffic. Applications and the Telegram message go out over the server's normal internet connection.</figcaption>
+  </figure>
+
+  <!-- ───────────────────────── HOW ───────────────────────── -->
+  <h2 id="how">How the agent turns a posting into an application</h2>
+  <p>Everything starts from one file, <code>src/personas.js</code>, which says who you are and which job titles you want. The agent finds postings that match, then works through them one at a time in a real Chrome browser, filling in each company's own form from your answers. Every job it touches is recorded, so it never applies to the same job twice.</p>
+
+  <figure>
+    <div class="fig">
+      <svg class="dg narrow" viewBox="0 0 620 600" role="img" aria-label="Your persona drives discovery, which fills a queue. The runner takes jobs from the queue one at a time, fills the company form in real Chrome, and runs checks. In a dry run it only screenshots the form; with --live it submits. Every result goes into the ledger, which feeds the nightly summary.">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+        <!-- 1 persona -->
+        <rect class="box" x="40" y="10" width="300" height="56" rx="7"/>
+        <text class="t" x="56" y="34">Your persona</text>
+        <text class="m" x="56" y="54">src/personas.js · Resume/</text>
+        <line class="edge" x1="190" y1="66" x2="190" y2="94" marker-end="url(#a2)"/>
+        <text class="lab" x="200" y="84">job titles you want (matchKeywords)</text>
+        <!-- 2 discovery -->
+        <rect class="box" x="40" y="96" width="300" height="56" rx="7"/>
+        <text class="t" x="56" y="120">Discovery</text>
+        <text class="s" x="56" y="140">job-board APIs, Ask HN, remote boards</text>
+        <line class="edge" x1="190" y1="152" x2="190" y2="180" marker-end="url(#a2)"/>
+        <text class="lab" x="200" y="170">new postings whose title matches</text>
+        <!-- 3 queue -->
+        <rect class="box" x="40" y="182" width="300" height="56" rx="7"/>
+        <text class="t" x="56" y="206">Queue</text>
+        <text class="m" x="56" y="226">queue-primary.json · jobs to try</text>
+        <line class="edge" x1="190" y1="238" x2="190" y2="266" marker-end="url(#a2)"/>
+        <text class="lab" x="200" y="256">one job at a time; fresh Chrome every ~20</text>
+        <!-- 4 runner -->
+        <rect class="box" x="40" y="268" width="300" height="56" rx="7"/>
+        <text class="t" x="56" y="292">Runner</text>
+        <text class="s" x="56" y="312">opens the company's form, fills every field</text>
+        <line class="edge" x1="190" y1="324" x2="190" y2="352" marker-end="url(#a2)"/>
+        <!-- 5 checks -->
+        <rect class="box" x="40" y="354" width="300" height="70" rx="7"/>
+        <text class="t" x="56" y="378">Checks before anything is sent</text>
+        <text class="s" x="56" y="397">applied here before? one company, one try?</text>
+        <text class="s" x="56" y="414">answers true to your persona and resume?</text>
+        <!-- split -->
+        <path class="edge" d="M190,424 V440 H115 V456" marker-end="url(#a2)"/>
+        <path class="edge" d="M190,440 H265 V456" marker-end="url(#a2)"/>
+        <rect class="box dry" x="40" y="458" width="146" height="56" rx="7"/>
+        <text class="t ok-t" x="113" y="482" text-anchor="middle">Practice run</text>
+        <text class="s" x="113" y="502" text-anchor="middle">screenshot, sends nothing</text>
+        <rect class="box live" x="194" y="458" width="146" height="56" rx="7"/>
+        <text class="t live-t" x="267" y="482" text-anchor="middle">--live</text>
+        <text class="s" x="267" y="502" text-anchor="middle">submits the application</text>
+        <path class="edge" d="M113,514 V530 H190 V546" marker-end="url(#a2)"/>
+        <path class="edge" d="M267,514 V530 H190"/>
+        <!-- 7 ledger -->
+        <rect class="box" x="40" y="548" width="300" height="46" rx="7"/>
+        <text class="t" x="56" y="568">Ledger → morning summary</text>
+        <text class="m" x="56" y="584">.state/ · every job, never repeated</text>
+        <!-- side notes -->
+        <text class="cap" x="372" y="34">YOU EDIT THIS</text>
+        <line class="edge" x1="368" y1="38" x2="346" y2="38"/>
+        <text class="cap" x="372" y="486">ONLY WITH --live</text>
+        <line class="edge" x1="368" y1="490" x2="346" y2="490"/>
+      </svg>
+    </div>
+    <figcaption>The split near the bottom is the one switch that matters: without <code>--live</code> the agent fills the form, takes a screenshot and stops. Nothing is ever sent unless you pass <code>--live</code>.</figcaption>
+  </figure>
+
+  <!-- ───────────────────────── NIGHT ───────────────────────── -->
+  <h2 id="night">What happens each night</h2>
+  <p>You won't run the agent by hand once it's set up. <strong>cron</strong>, the Linux scheduler, starts the <strong>nightly orchestrator</strong> at the time you pick. The orchestrator takes each persona in turn, running a short <strong>round</strong> for each, until every persona reaches its target or the night's time is up. Then it sends one message to your phone.</p>
+
+  <figure>
+    <div class="fig">
+      <svg class="dg narrow" viewBox="0 0 620 560" role="img" aria-label="cron starts the orchestrator, which checks the Google login, then loops over personas: discovery, a round that locks the browser profile and applies in batches, then closes the round. It loops until targets are met or the cutoff time, then writes a summary and sends it to Telegram.">
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+        <rect class="box" x="150" y="10" width="300" height="42" rx="7"/>
+        <text class="t" x="300" y="30" text-anchor="middle">cron, at your start time</text>
+        <text class="m" x="300" y="45" text-anchor="middle">e.g. 06:00 UTC</text>
+        <line class="edge" x1="300" y1="52" x2="300" y2="74" marker-end="url(#a3)"/>
+        <rect class="box" x="150" y="76" width="300" height="42" rx="7"/>
+        <text class="t" x="300" y="96" text-anchor="middle">Nightly orchestrator starts</text>
+        <text class="m" x="300" y="111" text-anchor="middle">scripts/nightly-orchestrator.sh</text>
+        <line class="edge" x1="300" y1="118" x2="300" y2="140" marker-end="url(#a3)"/>
+        <rect class="box" x="150" y="142" width="300" height="42" rx="7"/>
+        <text class="t" x="300" y="162" text-anchor="middle">Is Google still signed in?</text>
+        <text class="s" x="300" y="177" text-anchor="middle">warns you if not (email codes need it)</text>
+        <line class="edge" x1="300" y1="184" x2="300" y2="212" marker-end="url(#a3)"/>
+        <!-- loop group -->
+        <rect class="group" x="120" y="214" width="360" height="236" rx="10"/>
+        <text class="cap" x="134" y="232">FOR EACH PERSONA, IN TURN</text>
+        <rect class="box inner" x="150" y="242" width="300" height="40" rx="6"/>
+        <text class="t" x="300" y="260" text-anchor="middle">Discovery</text>
+        <text class="s" x="300" y="275" text-anchor="middle">fresh postings, about 90 seconds</text>
+        <line class="edge" x1="300" y1="282" x2="300" y2="300" marker-end="url(#a3)"/>
+        <rect class="box inner" x="150" y="302" width="300" height="70" rx="6"/>
+        <text class="t" x="300" y="322" text-anchor="middle">Round</text>
+        <text class="s" x="300" y="341" text-anchor="middle">lock the browser profile, check the machine,</text>
+        <text class="s" x="300" y="358" text-anchor="middle">apply in batches of up to 20 jobs</text>
+        <line class="edge" x1="300" y1="372" x2="300" y2="390" marker-end="url(#a3)"/>
+        <rect class="box inner" x="150" y="392" width="300" height="40" rx="6"/>
+        <text class="t" x="300" y="410" text-anchor="middle">Close the round</text>
+        <text class="s" x="300" y="425" text-anchor="middle">record results, unlock the profile</text>
+        <!-- loop back -->
+        <path class="edge" d="M450,412 H520 V262 H456" marker-end="url(#a3)"/>
+        <text class="lab" x="528" y="328">next persona,</text>
+        <text class="lab" x="528" y="344">next cycle</text>
+        <text class="lab" x="528" y="360">(up to 8)</text>
+        <!-- exit -->
+        <line class="edge" x1="300" y1="450" x2="300" y2="478" marker-end="url(#a3)"/>
+        <text class="lab" x="310" y="468">targets met, or 15 min before the next start</text>
+        <rect class="box" x="150" y="480" width="300" height="34" rx="7"/>
+        <text class="t" x="300" y="502" text-anchor="middle">Summary saved</text>
+        <line class="edge" x1="300" y1="514" x2="300" y2="526" marker-end="url(#a3)"/>
+        <rect class="box" x="150" y="528" width="300" height="28" rx="7"/>
+        <text class="t" x="300" y="547" text-anchor="middle">Telegram message to your phone</text>
+      </svg>
+    </div>
+    <figcaption>A <strong>round</strong> is one persona's turn. The lock stops two runs from ever using the same browser at once. Each job takes a minute or two on purpose, because applying too fast gets you flagged as spam.</figcaption>
+  </figure>
+
+  <!-- ───────────────────────── NEED ───────────────────────── -->
+  <h2 id="need">What you need</h2>
+  <h3>The server</h3>
+  <ul class="check">
+    <li>A computer that can stay on all the time, with an <strong>Intel or AMD (x86-64) processor</strong>. Chrome has no Linux version for ARM chips, so a Raspberry Pi won't work.</li>
+    <li><strong>8 GB of memory</strong> (4 GB works for one browser at a time) and <strong>30 GB of free disk</strong>.</li>
+    <li>On your <strong>home internet</strong> if you can. Job sites flag cloud-server addresses more often than home connections.</li>
+    <li>A USB stick to install Ubuntu, plus a screen and keyboard for the first 20 minutes only.</li>
+  </ul>
+  <h3>Your laptop and phone</h3>
+  <ul class="check">
+    <li>A terminal: <strong>Terminal</strong> on a Mac, or <strong>PowerShell</strong> on Windows. Both already have <code>ssh</code>.</li>
+    <li><a href="https://tailscale.com/download">Tailscale</a>: a free account, and the app on your laptop.</li>
+    <li><a href="https://www.realvnc.com/en/connect/download/viewer/">RealVNC Viewer</a> (free), used once in step 7.</li>
+    <li>Optional but recommended: <a href="https://code.visualstudio.com/">VS Code</a> with the <strong>Remote - SSH</strong> extension, to edit files on the server comfortably.</li>
+    <li>Telegram on your phone, for the morning summary.</li>
+    <li>Your resume as a PDF, a Google account and a LinkedIn account.</li>
+  </ul>
+  <p class="time">Total time: about 1½–2 hours, most of it waiting for installs.</p>
+
+  <!-- ───────────────────────── STEP 1 ───────────────────────── -->
+  <h2 id="s1" class="step-title"><span class="step-no">01</span>Install Ubuntu and Tailscale</h2>
+  <p class="time">At the server, with a screen and keyboard · 30 min</p>
+  <ol>
+    <li>Download <a href="https://ubuntu.com/download/server">Ubuntu Server 24.04 LTS</a> and write it to a USB stick (balenaEtcher or Rufus work).</li>
+    <li>Boot the server from the stick and follow the installer. When asked, create your user (<code class="v" data-k="USER">you</code>) and tick <strong>Install OpenSSH server</strong>.</li>
+    <li>After it restarts, log in at the server's own keyboard and install Tailscale:</li>
+  </ol>
+  <div class="cmd" data-where="console"><div class="cmd-head"><span class="where">At the server's keyboard</span><button class="copy" type="button">Copy</button></div>
+<pre><code>curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up</code></pre>
+    <p class="note"><code>tailscale up</code> prints a link. Open it on your laptop or phone and sign in with the same Tailscale account as your laptop.</p></div>
+  <ol start="4">
+    <li>Open the <a href="https://login.tailscale.com/admin/machines">Tailscale admin console</a>, find the new machine, and choose <strong>… → Edit machine name</strong>. Name it <code class="v" data-k="HOST">jobserver</code>.</li>
+  </ol>
+  <p>You can unplug the screen and keyboard now. Everything from here happens from your laptop.</p>
+
+  <!-- ───────────────────────── STEP 2 ───────────────────────── -->
+  <h2 id="s2" class="step-title"><span class="step-no">02</span>Connect from your laptop</h2>
+  <p class="time">On your laptop · 5 min</p>
+  <p>Make sure Tailscale is running and signed in on your laptop, then open a terminal and connect:</p>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST}</code></pre>
+    <p class="note">The first time, type <code>yes</code> to trust the server, then your Ubuntu password. Your prompt changes to <code>{USER}@{HOST}</code>: you're now typing on the server. <kbd>exit</kbd> brings you back.</p></div>
+  <div class="callout net"><p><strong>"Could not resolve hostname"?</strong> On the server, run <code>tailscale ip -4</code> and use the <code>100.x.y.z</code> address it prints instead of the name.</p></div>
+  <p><strong>Optional, recommended:</strong> in VS Code, install <strong>Remote - SSH</strong>, open the command palette (<kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>), choose <strong>Remote-SSH: Connect to Host…</strong> and enter <code class="v" data-k="USER@HOST">you@jobserver</code>. You can then open folders and files on the server as if they were on your laptop, and its built-in terminal is already on the server.</p>
+
+  <!-- ───────────────────────── STEP 3 ───────────────────────── -->
+  <h2 id="s3" class="step-title"><span class="step-no">03</span>Install the tools</h2>
+  <p class="time">On the server (over ssh) · 10 min</p>
+  <p>This installs Google Chrome, a <em>virtual screen</em> for Chrome to draw on (<code>xvfb</code>), a way to view that screen once (<code>x11vnc</code>), and Node.js, which the agent is written in. Paste it all at once:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>sudo timedatectl set-timezone UTC
+sudo apt-get update
+sudo apt-get install -y git curl python3 xvfb x11vnc
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.nvm/nvm.sh
+nvm install 22
+node -v</code></pre>
+    <p class="note">The last line should print <code>v22.something</code>. The first line sets the server's clock to UTC so the schedule in step 10 is easy to read. Skip it if this machine already runs other scheduled things.</p></div>
+
+  <!-- ───────────────────────── STEP 4 ───────────────────────── -->
+  <h2 id="s4" class="step-title"><span class="step-no">04</span>Download the agent</h2>
+  <p class="time">On the server · 2 min</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>git clone https://github.com/fgbosibo17/Apply-Agent.git ~/job-agent
+cd ~/job-agent</code></pre>
+    <p class="note">This makes your own copy in <code>~/job-agent</code>. Your edits stay on your server: you can't push changes back to this repo, so your details can't end up public by accident.</p></div>
+
+  <!-- ───────────────────────── STEP 5 ───────────────────────── -->
+  <h2 id="s5" class="step-title"><span class="step-no">05</span>Build your persona</h2>
+  <p class="time">Laptop + server · 20–30 min</p>
+  <p>A <strong>persona</strong> is you, as the agent presents you: your contact details, your answers to the usual application questions, your resume, and the job titles you're after. It lives in <code>src/personas.js</code>, which ships with placeholders such as <code>&lt;FILL_ME_IN&gt;</code> that you replace.</p>
+  <h3>Copy your resume to the server</h3>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>scp ~/Downloads/My_Resume.pdf {USER}@{HOST}:job-agent/Resume/</code></pre>
+    <p class="note">Change <code>~/Downloads/My_Resume.pdf</code> to where your resume actually is. On Windows that might be <code>$HOME\Downloads\My_Resume.pdf</code>. With VS Code Remote-SSH you can drag the file into the <code>Resume</code> folder instead.</p></div>
+  <h3>Fill in <code>src/personas.js</code></h3>
+  <p>Open it in VS Code (Remote-SSH → Open Folder → <code>~/job-agent</code>), or on the server with <code>nano ~/job-agent/src/personas.js</code> (<kbd>Ctrl</kbd>+<kbd>O</kbd> saves, <kbd>Ctrl</kbd>+<kbd>X</kbd> exits). Fill in three blocks: <code>common</code>, <code>identityA</code> and the <code>primary</code> persona. Leave <code>adjacent</code> and <code>secondary</code> exactly as they are: the agent skips examples you haven't filled in.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Field</th><th>What to put</th></tr></thead>
+    <tbody>
+      <tr><td><code>firstName</code>, <code>lastName</code>, <code>fullName</code>, <code>email</code>, <code>phoneDigits</code>, <code>phoneFull</code>, <code>linkedIn</code></td><td>Your real contact details, exactly as on your resume.</td></tr>
+      <tr><td><code>city</code>, <code>state</code>, <code>stateFull</code>, <code>zip</code></td><td>Where you live. Used for "where are you located?" and hybrid jobs near you.</td></tr>
+      <tr><td><code>authorizedUS</code>, <code>usCitizen</code>, <code>workAuthStatus</code>, <code>needsSponsorship…</code></td><td>Your work authorization, truthfully. Jobs open only to US citizens are skipped if <code>usCitizen</code> isn't <code>'Yes'</code>.</td></tr>
+      <tr><td><code>gender</code>, <code>race</code>, <code>pronouns</code>, <code>veteranStatus</code>, <code>disabilityStatus</code></td><td>Voluntary equal-opportunity answers. Fill them in, or leave the <code>&lt;…&gt;</code> placeholder: the agent then picks "decline to answer", never a guess.</td></tr>
+      <tr><td class="wrap"><code>resumePath</code></td><td>Change <code>&lt;Your_Resume.pdf&gt;</code> to your file's exact name, e.g. <code>My_Resume.pdf</code>. Capital letters must match.</td></tr>
+      <tr><td><code>currentEmployer</code>, <code>currentTitle</code>, <code>totalYearsExperience</code></td><td>From your resume.</td></tr>
+      <tr><td><code>salaryMin</code>, <code>salaryMax</code>, <code>salaryTarget</code>, <code>salaryRangeString</code></td><td>Your range. The string is what forms get when they ask, e.g. <code>'$80,000 - $105,000'</code>.</td></tr>
+      <tr><td><code>elevatorPitch</code>, <code>whyThisRoleBlurb</code>, <code>reasonForLeaving</code></td><td>One or two honest sentences each. They answer open questions on forms.</td></tr>
+      <tr><td><code>targetRoles</code></td><td>Job titles to search for, e.g. <code>['Operations Analyst remote', 'Business Analyst remote']</code>.</td></tr>
+      <tr><td><code>matchKeywords</code></td><td>Which job titles count as a match, written as <code>/Title one|Title two|Title three/i</code>. This decides which jobs get applied to, so make it specific.</td></tr>
+      <tr><td><code>skills</code></td><td>Skills that are really on your resume, separated by <code>|</code>, e.g. <code>'Excel|SQL|Tableau'</code>. "How many years of X?" gets your real total for these, and 0 for anything else.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Here's what a filled-in <code>primary</code> block looks like, with made-up values:</p>
+  <div class="cmd" data-where="file"><div class="cmd-head"><span class="where">Example · src/personas.js</span><button class="copy" type="button">Copy</button></div>
+<pre><code>  primary: {
+    ...common,
+    ...identityA,
+    persona: 'primary',
+    resumePath: path.join(RESUME_DIR, 'My_Resume.pdf'),
+    resumeDocx: path.join(RESUME_DIR, 'My_Resume.docx'),
+    currentEmployer: 'Example Logistics',
+    currentTitle: 'Operations Analyst',
+    totalYearsExperience: 6,
+    salaryMin: 80000,
+    salaryMax: 105000,
+    salaryTarget: 95000,
+    salaryRangeString: '$80,000 - $105,000',
+    reasonForLeaving: 'Looking for a remote role with more ownership of reporting.',
+    whyThisRoleBlurb: 'I like turning messy operations data into decisions. Six years of reporting and process work have made me quick with SQL and dashboards.',
+    elevatorPitch: 'Operations analyst with 6 years in logistics reporting, SQL and dashboards.',
+    targetRoles: ['Operations Analyst remote', 'Business Analyst remote', 'Data Analyst remote'],
+    matchKeywords: /Operations Analyst|Business Analyst|Data Analyst/i,
+    skills: 'Excel|SQL|Tableau|Power BI',
+  },</code></pre></div>
+  <p>Check your work. This catches typos, and shows whether your target titles route to your persona:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent && node src/check-personas.js</code></pre>
+    <p class="note">Your line should show your name, email and <code>resume OK</code>. A red error pointing at a line number means a missing quote or comma on that line.</p></div>
+
+  <!-- ───────────────────────── STEP 6 ───────────────────────── -->
+  <h2 id="s6" class="step-title"><span class="step-no">06</span>Check the server is ready</h2>
+  <p class="time">On the server · 3 min</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent && bash scripts/bootstrap.sh</code></pre>
+    <p class="note">It installs the agent's dependencies, then prints a checklist. Each problem comes with the fix.</p></div>
+  <p>At this point you should see <code>[ok]</code> for node, Chrome, xvfb, disk and <code>resume:{PERSONA}</code>. Two other things are normal for now:</p>
+  <ul>
+    <li><code>[warn] resume:adjacent</code> and <code>resume:secondary</code>: the examples you left alone.</li>
+    <li><code>[FAIL] profile:{PERSONA}: … Nobody has logged in</code>: that's the next step.</li>
+  </ul>
+
+  <!-- ───────────────────────── STEP 7 ───────────────────────── -->
+  <h2 id="s7" class="step-title"><span class="step-no">07</span>Log in to Google and LinkedIn, once</h2>
+  <p class="time">Laptop + server · 10 min</p>
+  <p>The agent uses a real Chrome browser with its own saved logins (a <strong>browser profile</strong>). Some job sites email a security code before you can submit, and the agent reads it from Gmail in that same browser. So the browser needs to be signed in to your Google account once. The server has no screen, so you'll look at its virtual screen from your laptop through a tunnel inside Tailscale:</p>
+  <figure>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 760 170" role="img" aria-label="The VNC viewer on your laptop connects to localhost port 5900. An ssh tunnel carries that over Tailscale to the server's own port 5900, where x11vnc shows the virtual screen that Chrome draws on.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a4n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="net-f" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <text class="cap" x="20" y="22">YOUR LAPTOP</text>
+        <rect class="group" x="12" y="30" width="148" height="110" rx="10"/>
+        <text class="cap" x="356" y="22">THE SERVER</text>
+        <rect class="group" x="348" y="30" width="400" height="110" rx="10"/>
+        <rect class="box" x="24" y="52" width="124" height="66" rx="7"/>
+        <text class="t" x="86" y="78" text-anchor="middle">VNC viewer</text>
+        <text class="m" x="86" y="98" text-anchor="middle">localhost:5900</text>
+        <rect class="net-band" x="176" y="66" width="156" height="38" rx="19"/>
+        <line class="edge net" x1="150" y1="85" x2="358" y2="85" marker-end="url(#a4n)"/>
+        <text class="t net-t" x="254" y="58" text-anchor="middle">ssh -L tunnel</text>
+        <text class="lab" x="254" y="124" text-anchor="middle">inside Tailscale</text>
+        <rect class="box" x="360" y="52" width="116" height="66" rx="7"/>
+        <text class="t" x="418" y="78" text-anchor="middle">x11vnc</text>
+        <text class="m" x="418" y="98" text-anchor="middle">localhost only</text>
+        <line class="edge" x1="476" y1="85" x2="494" y2="85" marker-end="url(#a4)"/>
+        <rect class="box" x="496" y="52" width="110" height="66" rx="7"/>
+        <text class="t" x="551" y="78" text-anchor="middle">virtual screen</text>
+        <text class="m" x="551" y="98" text-anchor="middle">Xvfb :77</text>
+        <line class="edge" x1="606" y1="85" x2="624" y2="85" marker-end="url(#a4)"/>
+        <rect class="box" x="626" y="52" width="110" height="66" rx="7"/>
+        <text class="t" x="681" y="78" text-anchor="middle">Chrome</text>
+        <text class="m" x="681" y="98" text-anchor="middle">your profile</text>
+      </svg>
+    </div>
+    <figcaption>The VNC server only listens on the server itself, so nobody can reach it from the internet. The ssh tunnel is the only way in, and it runs inside Tailscale.</figcaption>
+  </figure>
+  <p><strong>a.</strong> On the server, start the login screen. It waits while you sign in:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent && bash scripts/login-profile.sh {PERSONA}</code></pre></div>
+  <p><strong>b.</strong> On your laptop, open a <em>second</em> terminal window and start the tunnel. It prints nothing; leave it open:</p>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh -N -L 5900:localhost:5900 {USER}@{HOST}</code></pre></div>
+  <p><strong>c.</strong> Open <strong>RealVNC Viewer</strong> and connect to <code>localhost:5900</code>. If it warns that the connection is unencrypted, continue: the ssh tunnel is already encrypting it. You'll see a Chrome window.</p>
+  <p><strong>d.</strong> Sign in to <strong>Google</strong> (Gmail) in the first tab, then <strong>LinkedIn</strong> in the second. Then close the Chrome window with its <strong>×</strong>. The server prints <code>Chrome closed — profile saved</code>. Stop the tunnel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+  <p><strong>e.</strong> Confirm Google stuck:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>python3 scripts/gmail-session-check.py</code></pre>
+    <p class="note">You want <code>✅ {PERSONA}: Gmail signed in</code>.</p></div>
+  <div class="callout warn"><p><strong>Never copy this browser folder to another computer.</strong> It holds live logins, and a copied profile looks like a different device, which is exactly what bot detection looks for. If a login ever expires, run this step again.</p></div>
+
+  <!-- ───────────────────────── STEP 8 ───────────────────────── -->
+  <h2 id="s8" class="step-title"><span class="step-no">08</span>Do a practice run</h2>
+  <p class="time">On the server · 15 min</p>
+  <p>First fill the agent's list of companies to search (it starts empty), then let it fill in three real application forms <em>without submitting them</em>:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server · sends nothing</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent
+npm run seed
+bash scripts/nightly-run.sh {PERSONA} --max 3</code></pre>
+    <p class="note">The practice run takes 5–10 minutes and ends with a summary in curly brackets. Look for <code>"dryRun": 3</code>. A practice run never uses up a job: the real run can still apply to it later.</p></div>
+  <p>Now look at what it filled in. In VS Code, open <code>.state/runs/dryrun/</code> and click each picture. Or copy the pictures to your laptop:</p>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>mkdir -p dryrun && scp "{USER}@{HOST}:job-agent/.state/runs/dryrun/*.png" dryrun/</code></pre></div>
+  <p>Read each form as if you were the recruiter. If an answer is wrong, fix it in <code>src/personas.js</code> and run the practice again. When you're happy, you can send one real application as a final test:</p>
+  <div class="cmd" data-where="live"><div class="cmd-head"><span class="where">On the server · submits a real application</span><button class="copy" type="button">Copy</button></div>
+<pre><code>bash scripts/nightly-run.sh {PERSONA} --live --max 1</code></pre></div>
+
+  <!-- ───────────────────────── STEP 9 ───────────────────────── -->
+  <h2 id="s9" class="step-title"><span class="step-no">09</span>Morning summary on your phone</h2>
+  <p class="time">Phone + server · 10 min · optional</p>
+  <ol>
+    <li>In Telegram, open a chat with <strong>@BotFather</strong>, send <code>/newbot</code>, and give it a name and a username ending in <code>bot</code>. It replies with a <strong>token</strong> like <code>123456:ABC-…</code>.</li>
+    <li>Open your new bot's chat and press <strong>Start</strong> (or send it "hi").</li>
+    <li>Find your chat id. Put your token in this command and look for <code>"chat":{"id":</code> followed by a number:</li>
+  </ol>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>curl -s "https://api.telegram.org/botPASTE_TOKEN_HERE/getUpdates"</code></pre></div>
+  <ol start="4"><li>Save both where the agent reads them, outside the repo, readable only by you:</li></ol>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cat &gt; ~/.telegram_notify_credentials &lt;&lt;'EOF'
+TELEGRAM_BOT_TOKEN=PASTE_TOKEN_HERE
+TELEGRAM_CHAT_ID=PASTE_CHAT_ID_HERE
+EOF
+chmod 600 ~/.telegram_notify_credentials</code></pre></div>
+  <ol start="5"><li>Send yourself a test message:</li></ol>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent
+echo '{"ranAt":"20261001T060000Z","mode":"--dry-run","results":[]}' &gt; /tmp/test-summary.json
+python3 scripts/notify-telegram.py /tmp/test-summary.json</code></pre>
+    <p class="note">Your phone gets "Job Apply run finished … (DRY RUN)". From now on you'll get one of these after every night, plus a warning if Google ever signs the browser out.</p></div>
+
+  <!-- ───────────────────────── STEP 10 ───────────────────────── -->
+  <h2 id="s10" class="step-title"><span class="step-no">10</span>Put it on a schedule</h2>
+  <p class="time">On the server · 5 min</p>
+  <p><strong>cron</strong> runs commands at set times. It starts programs with almost no settings, so first print the line that tells it where Node.js lives:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>echo "PATH=$(dirname "$(which node)"):/usr/local/bin:/usr/bin:/bin"</code></pre>
+    <p class="note">Copy the line it prints. It starts with <code>PATH=/home/{USER}/.nvm/</code>.</p></div>
+  <p>Open your schedule with <code>crontab -e</code> (pick <code>nano</code> if it asks), go to the bottom, and paste this. Then replace the first line with the one you just copied:</p>
+  <div class="cmd" data-where="live"><div class="cmd-head"><span class="where">crontab -e · submits real applications nightly</span><button class="copy" type="button">Copy</button></div>
+<pre><code>PATH=/home/{USER}/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/usr/bin:/bin
+PERSONAS={PERSONA}
+TARGET=25
+NEXT_START_UTC=06:00
+0 6 * * *  cd /home/{USER}/job-agent &amp;&amp; mkdir -p .state/runs/logs &amp;&amp; bash scripts/nightly-orchestrator.sh --live &gt;&gt; .state/runs/logs/cron.log 2&gt;&amp;1</code></pre>
+    <p class="note">Save with <kbd>Ctrl</kbd>+<kbd>O</kbd>, <kbd>Enter</kbd>, exit with <kbd>Ctrl</kbd>+<kbd>X</kbd>. <code>crontab -l</code> shows what's saved.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Line</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td><code>PATH=…</code></td><td>Where to find Node.js.</td></tr>
+      <tr><td><code>PERSONAS={PERSONA}</code></td><td>Run only your persona, not the unfilled examples.</td></tr>
+      <tr><td><code>TARGET=25</code></td><td>Applications per night. Start small, raise it once you trust the answers.</td></tr>
+      <tr><td><code>NEXT_START_UTC=06:00</code></td><td>Must match the start time on the last line. The run stops 15 minutes before the next one would begin.</td></tr>
+      <tr><td><code>0 6 * * *</code></td><td>Minute 0, hour 6, every day: 06:00 UTC.</td></tr>
+      <tr><td><code>--live</code></td><td>Actually submit. Without it, every night is a practice run.</td></tr>
+    </tbody>
+  </table></div>
+  <p>06:00 UTC in US time zones. Clocks go back in November, so winter is an hour earlier:</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Time zone</th><th>Summer (Mar–Nov)</th><th>Winter (Nov–Mar)</th></tr></thead>
+    <tbody>
+      <tr><td>Eastern</td><td>2:00 am</td><td>1:00 am</td></tr>
+      <tr><td>Central</td><td>1:00 am</td><td>midnight</td></tr>
+      <tr><td>Mountain</td><td>midnight</td><td>11:00 pm</td></tr>
+      <tr><td>Pacific</td><td>11:00 pm</td><td>10:00 pm</td></tr>
+    </tbody>
+  </table></div>
+  <p>To start at a different time, change the hour in <strong>both</strong> places: <code>0 7 * * *</code> with <code>NEXT_START_UTC=07:00</code> starts an hour later.</p>
+
+  <!-- ───────────────────────── STEP 11 ───────────────────────── -->
+  <h2 id="s11" class="step-title"><span class="step-no">11</span>Control it from your laptop</h2>
+  <p>You never need to log in to the server for day-to-day things. Each of these runs one command on the server over Tailscale and shows you the answer. They work as-is in Mac Terminal and Windows PowerShell.</p>
+  <h3>How did last night go?</h3>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST} "cd job-agent &amp;&amp; . scripts/lib/ensure-node.sh &amp;&amp; npm run -s agent -- digest --since 1d --format telegram"</code></pre></div>
+  <h3>Is it running right now?</h3>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST} "tail -n 40 job-agent/.state/runs/logs/cron.log"</code></pre></div>
+  <h3>Stop it now</h3>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST} "cd job-agent &amp;&amp; bash scripts/stop-now.sh"</code></pre>
+    <p class="note">The job in progress finishes first, so nothing is left half-submitted. Tomorrow night still runs as scheduled.</p></div>
+  <h3>Apply to 10 more right now</h3>
+  <div class="cmd" data-where="live"><div class="cmd-head"><span class="where">On your laptop · submits real applications</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST} "cd job-agent &amp;&amp; nohup bash scripts/persona-push.sh {PERSONA} 10 --live &gt; /dev/null 2&gt;&amp;1 &amp;"</code></pre></div>
+  <h3>Is Google still signed in? Is the machine healthy?</h3>
+  <div class="cmd" data-where="laptop"><div class="cmd-head"><span class="where">On your laptop</span><button class="copy" type="button">Copy</button></div>
+<pre><code>ssh {USER}@{HOST} "cd job-agent &amp;&amp; python3 scripts/gmail-session-check.py"
+ssh {USER}@{HOST} "cd job-agent &amp;&amp; . scripts/lib/ensure-node.sh &amp;&amp; npm run -s doctor"</code></pre></div>
+  <h3>Pause the schedule</h3>
+  <p>Run <code>ssh {USER}@{HOST}</code>, then <code>crontab -e</code>, and put a <code>#</code> at the very start of the <code>0 6 * * *</code> line. Remove the <code>#</code> to resume.</p>
+
+  <!-- ───────────────────────── STEP 12 ───────────────────────── -->
+  <h2 id="s12" class="step-title"><span class="step-no">12</span>Update to a new version</h2>
+  <p>The agent never updates itself, so nothing changes under you in the middle of a night. When there's a new version (see the <a href="https://github.com/fgbosibo17/Apply-Agent/releases">releases page</a>), update during the day:</p>
+  <div class="cmd" data-where="server"><div class="cmd-head"><span class="where">On the server</span><button class="copy" type="button">Copy</button></div>
+<pre><code>cd ~/job-agent &amp;&amp; git stash &amp;&amp; git pull &amp;&amp; git stash pop &amp;&amp; npm ci</code></pre>
+    <p class="note"><code>git stash</code> sets your persona edits aside while the new version comes in, and <code>git stash pop</code> puts them back. If it reports a <em>conflict</em>, stop there and ask for help before running anything else.</p></div>
+
+  <!-- ───────────────────────── TROUBLE ───────────────────────── -->
+  <h2 id="trouble">When something goes wrong</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>What you see</th><th>What it means</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>No Telegram message in the morning</td><td>The night didn't start, or Telegram isn't set up</td><td>Check <code>crontab -l</code>, then read the log with the "Is it running?" command. Redo step 9's test.</td></tr>
+      <tr><td><code>node not found</code> in the log</td><td>cron can't find Node.js</td><td>Redo the <code>PATH=</code> line in step 10.</td></tr>
+      <tr><td><code>❌ NOT signed in to Google</code></td><td>Google signed the browser out</td><td>Redo step 7. Jobs that email a code are skipped until you do.</td></tr>
+      <tr><td><code>Nobody has logged in as …</code></td><td>The browser profile is empty</td><td>Step 7.</td></tr>
+      <tr><td><code>persona "…" is not set up</code></td><td><code>src/personas.js</code> still has placeholders for that persona</td><td>Finish step 5, or check <code>PERSONAS=</code> in your crontab.</td></tr>
+      <tr><td><code>another run holds the browser profile</code></td><td>A run is still going, or one crashed</td><td>Wait for it, or run "Stop it now". If it's definitely dead: <code>npm run agent -- round unlock --force --persona {PERSONA}</code>.</td></tr>
+      <tr><td>0 applied every night</td><td>No matching jobs, or everything is being skipped</td><td>Run "How did last night go?" and read the skip reasons. Try <code>npm run seed</code>, and check that <code>matchKeywords</code> isn't too narrow.</td></tr>
+      <tr><td>Chrome crashed in step 7</td><td>Usually a container or a locked-down VM</td><td>Use a normal Ubuntu install or VM. Chrome's sandbox doesn't run inside a default Docker container.</td></tr>
+      <tr><td>VNC shows nothing or won't connect</td><td>The tunnel isn't running, or the login script ended</td><td>Keep both terminals from step 7 open at the same time, and connect to <code>localhost:5900</code>, not the server's name.</td></tr>
+    </tbody>
+  </table></div>
+
+  <!-- ───────────────────────── RULES ───────────────────────── -->
+  <h2 id="rules">Rules that keep you safe</h2>
+  <div class="callout warn"><p><strong>Practise before <code>--live</code>.</strong> After any change to your persona, run a practice and read the screenshots. <code>--live</code> sends real applications to real employers under your name.</p></div>
+  <div class="callout"><p><strong>Your details stay on your server.</strong> <code>src/personas.js</code> and your resume hold your name, email and phone. Don't upload them anywhere or paste them into a public repo.</p></div>
+  <div class="callout"><p><strong>Let the server do the applying.</strong> If you also run the agent on your laptop, the two keep separate records and can apply to the same job twice. Use the laptop only to control the server.</p></div>
+  <div class="callout"><p><strong>Keep the server patched.</strong> Once a month, during the day: <code>sudo apt-get update &amp;&amp; sudo apt-get upgrade -y</code>. This also updates Chrome.</p></div>
+  <div class="callout net"><p><strong>Don't open ports on your router.</strong> Tailscale is how you reach the server from anywhere; nothing needs to be exposed to the internet.</p></div>
+
+  <!-- ───────────────────────── WORDS ───────────────────────── -->
+  <h2 id="words">Words used in this guide</h2>
+  <dl class="gloss">
+    <dt>Persona</dt><dd>You as the agent presents you: contact details, answers, resume and target job titles, in <code>src/personas.js</code>.</dd>
+    <dt>Discovery</dt><dd>Searching job-board APIs and public lists for new postings that match your titles.</dd>
+    <dt>Queue</dt><dd>The list of jobs waiting to be tried: <code>queue-{PERSONA}.json</code>.</dd>
+    <dt>Round</dt><dd>One persona's turn at applying. It has an id like <code>rnd_20261001_ab12cd34</code>.</dd>
+    <dt>Practice run</dt><dd>Also called a dry run. Fills the form and takes a screenshot without submitting. This is the default.</dd>
+    <dt><code>--live</code></dt><dd>The switch that makes a run submit for real.</dd>
+    <dt>Browser profile</dt><dd>Chrome's folder of saved logins on the server (<code>browser-profile-{PERSONA}</code>). Made once, in step 7.</dd>
+    <dt>Lock</dt><dd>A marker that stops two runs from using the same browser profile at once.</dd>
+    <dt>Ledger</dt><dd>The record of every job the agent has seen or applied to, in <code>.state/</code>. It's what prevents duplicates.</dd>
+    <dt>Digest</dt><dd>The summary of a run: how many applied, skipped and failed.</dd>
+    <dt>cron</dt><dd>Linux's built-in scheduler.</dd>
+    <dt>Tailscale</dt><dd>A private network between your own devices, so your laptop can reach the server from anywhere.</dd>
+    <dt>ssh</dt><dd>Typing commands on another computer through your own terminal.</dd>
+    <dt>VNC</dt><dd>Seeing and using another computer's screen. Used once, to log in.</dd>
+  </dl>
+
+  <p class="footer">Apply Agent · source and full docs at <a href="https://github.com/fgbosibo17/Apply-Agent">github.com/fgbosibo17/Apply-Agent</a> (README Part 2 and ONBOARDING.md cover every option in more depth).</p>
+</div>
+
+<script>
+(function () {
+  var KEY = 'apply-agent-guide-names-v2';
+  var defaults = { USER: 'you', HOST: 'jobserver', PERSONA: 'primary' };
+  var vals = Object.assign({}, defaults);
+  try { Object.assign(vals, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { /* storage unavailable */ }
+
+  var inputs = Array.prototype.slice.call(document.querySelectorAll('.fields input'));
+  var codes = Array.prototype.slice.call(document.querySelectorAll('.cmd pre code'));
+  var notes = Array.prototype.slice.call(document.querySelectorAll('.cmd .note, td, dd, li, p'));
+  codes.forEach(function (c) { c.dataset.tpl = c.textContent; });
+  // Prose containing {USER}/{HOST}/{PERSONA} placeholders (text nodes only).
+  var textNodes = [];
+  notes.forEach(function (el) {
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var n;
+    while ((n = walker.nextNode())) {
+      if (/\{(USER|HOST|PERSONA)\}/.test(n.nodeValue) && !n.parentNode.closest('pre')) {
+        if (textNodes.indexOf(n) === -1) { n.__tpl = n.nodeValue; textNodes.push(n); }
+      }
+    }
+  });
+
+  function clean(v, fallback) {
+    v = String(v || '').trim();
+    return v === '' ? fallback : v;
+  }
+  function fill(s) {
+    return s.replace(/\{USER\}/g, clean(vals.USER, defaults.USER))
+            .replace(/\{HOST\}/g, clean(vals.HOST, defaults.HOST))
+            .replace(/\{PERSONA\}/g, clean(vals.PERSONA, defaults.PERSONA));
+  }
+  function render() {
+    codes.forEach(function (c) { c.textContent = fill(c.dataset.tpl); });
+    textNodes.forEach(function (n) { n.nodeValue = fill(n.__tpl); });
+    Array.prototype.forEach.call(document.querySelectorAll('code.v'), function (el) {
+      var k = el.dataset.k;
+      el.textContent = k === 'USER@HOST' ? fill('{USER}@{HOST}') : fill('{' + k + '}');
+    });
+  }
+  inputs.forEach(function (inp) {
+    inp.value = vals[inp.dataset.key] || '';
+    inp.addEventListener('input', function () {
+      vals[inp.dataset.key] = inp.value;
+      try { localStorage.setItem(KEY, JSON.stringify(vals)); } catch (e) { /* ignore */ }
+      render();
+    });
+  });
+  render();
+
+  Array.prototype.forEach.call(document.querySelectorAll('.cmd'), function (box) {
+    var btn = box.querySelector('.copy');
+    var code = box.querySelector('pre code');
+    if (!btn || !code) return;
+    btn.addEventListener('click', function () {
+      var text = code.textContent;
+      function done(ok) {
+        btn.textContent = ok ? 'Copied' : 'Select + copy';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1600);
+      }
+      function selectIt() {
+        var r = document.createRange(); r.selectNodeContents(code);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        done(false);
+      }
+      try {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, selectIt);
+      } catch (e) { selectIt(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

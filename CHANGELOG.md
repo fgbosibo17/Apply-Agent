@@ -10,6 +10,9 @@ Newest first.
 ## [Unreleased]
 ### Added
 - **LICENSE** (MIT), matching the `license` field package.json already declared.
+- **[Nightly server guide](https://fgbosibo17.github.io/Apply-Agent/server-setup.html)** —
+  a step-by-step web page with diagrams for setting up a scheduled server you control
+  over Tailscale (`docs/server-setup.html`, linked from the README and the updates page).
 - `scripts/stop-now.sh` — stop whatever is running on this machine (the job in flight
   finishes; rounds left open by a crash are closed at once). Handy from another
   computer: `ssh you@server "cd job-agent && bash scripts/stop-now.sh"`.

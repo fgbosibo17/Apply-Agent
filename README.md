@@ -161,6 +161,8 @@ Everything you applied to is in `applications-log.csv` and the ledger in `.state
 
 Put the agent on an always-on Linux box and let it apply overnight, every night, while your laptop is closed. You get a summary in the morning.
 
+> **Never set up a server before?** Follow the **[step-by-step server guide](https://fgbosibo17.github.io/Apply-Agent/server-setup.html)** — diagrams, copy-paste commands, and controlling it from your laptop over Tailscale.
+
 **What runs unattended:**
 - **The nightly orchestrator** — takes every persona in turn toward its target (one short round each per cycle, so nobody starves), runs discovery, applies, and stops before the next night starts. It never overlaps itself.
 - **Safety by default** — every scheduled run is a **dry run unless you pass `--live`**, a run caps itself with `--max`, and the same job is never applied to twice, even across machines.
