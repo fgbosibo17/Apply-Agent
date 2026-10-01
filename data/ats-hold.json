@@ -1,0 +1,3 @@
+{
+  "_comment": "Temporarily pause one ATS without touching code. Held jobs are NOT marked seen, so they are applied to once the hold lapses. Example: \"ashby\": { \"until\": \"2026-12-01T00:00:00Z\", \"reason\": \"spam-flagged; let the profile age\" }"
+}

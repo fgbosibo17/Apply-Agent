@@ -10,7 +10,13 @@ const { fillLocation } = require('../util/location');
 const { handleCaptcha } = require('../util/captcha');
 const { fillRemainingRequired, proofread, handleRadioGroups, dryRunShotPath } = require('../util/form');
 const { optionForLabel, textValueForLabel, yesNoForLabel } = require('../util/answers-map');
+const { pickEeo } = require('../util/eeo');
 const { getLearned, saveLearned } = require('../util/learned');
+const { attachResume } = require('../resume/upload');
+const { gateBeforeSubmit } = require('../util/answer-review');
+const { handleGreenhouseVerification } = require('../util/greenhouse-verify');
+const { coverLetterFor } = require('../util/cover-letter');
+const answerEngine = require('../answer-engine');
 
 // Parse the board token + numeric job id out of any Greenhouse URL form
 // (boards. / job-boards. / embed). Returns null if it doesn't look like one.
@@ -44,18 +50,19 @@ function coverLetterText(jobMeta) {
   const role = (jobMeta && jobMeta.role) || 'this role';
   const pitch = a.whyThisRoleBlurb || a.elevatorPitch || '';
   return `Dear Hiring Team,\n\nI'm excited to apply for the ${role} role at ${company}. ${pitch}\n\n`
-    + `With ${a.totalYearsExperience}+ years across cloud support, DevOps, and customer-facing technical work, I bring hands-on depth in AWS and Azure, CI/CD, identity/access, and incident response, plus a track record of resolving complex issues end-to-end and keeping customers and production systems running smoothly. I'd welcome the chance to bring that same ownership to ${company}.\n\n`
+    + `With ${a.totalYearsExperience}+ years of experience${a.currentTitle ? ` as a ${a.currentTitle}` : ''}, I'd welcome the chance to bring that same ownership to ${company}.\n\n`
     + `Thank you for your consideration.\n\nBest regards,\n${a.fullName}`;
 }
 
 // Decide a text value for a schema question by its label. Returns null when the
 // field should be left to other logic (files) or can't be answered.
-function valueForLabel(label) {
+function valueForLabel(label, jobMeta) {
   const l = (label || '').toLowerCase();
   if (/(prepared|submitted|completed|written|generated)\b.{0,70}\b(by|with|using|via)\b.{0,25}(ai\b|gpt|llm|language model|automat|bot|chatgpt)|in whole or in part by an? (ai|automat|language model)|use[ds]?\b.{0,15}(ai|chatgpt|gpt).{0,40}(prepar|complet|fill|writ|appl)|\bai[- ]?(generated|prepared|assisted|written)\b/.test(l)) return 'No';
   if (/preferred (first )?name|nickname|what.*(call|name).*you/.test(l)) return a.firstName;
   if (/how did you hear|how.*(find|learn).*(job|role|position|us|affirm|company|employer)|learn about|referral source/.test(l)) return a.howDidYouHear;
-  if (/linkedin/.test(l)) return a.linkedIn;
+  if (/linkedin/.test(l)) return a.linkedIn || '';
+  if (/where do you (currently )?live|current (city|location|address)|city.*state|where are you based|where.*located/i.test(l)) return `${a.city}, ${a.state}`;
   if (/website|portfolio|personal site/.test(l)) return a.portfolio;
   if (/github/.test(l)) return a.github || a.linkedIn;
   if (/twitter/.test(l)) return '';
@@ -67,6 +74,7 @@ function valueForLabel(label) {
   if (/school|university|college|institution|alma mater/.test(l)) return a.highestDegreeSchool;
   if (/cover letter/.test(l)) return a.whyThisRoleBlurb || a.elevatorPitch;
   if (/salary|compensation|expected pay|desired pay/.test(l) && !/current salary|salary history|last salary|present salary|previous salary/.test(l)) return a.salaryRangeString;
+  if (/ideal.*pay|pay.*range|annual.*pay|desired.*salary|base salary|salary.*expect/i.test(l)) return a.salaryRangeString;
   if (/notice period/.test(l)) return a.noticePeriod;
   if (/start date|when.*(start|available)|availability|earliest.*(start|available)/.test(l)) return a.earliestStartDate;
   if (/how many years|years of experience|years.*experience/.test(l)) return String(a.totalYearsExperience);
@@ -75,10 +83,10 @@ function valueForLabel(label) {
   if (/language/.test(l)) return 'English';
   if (/^city$|city you|which city/.test(l)) return a.city;
   if (/state|province/.test(l)) return a.stateFull;
-  if (/zip|postal/.test(l)) return a.zip || '77002';
+  if (/zip|postal/.test(l)) return a.zip || '';
   if (/^country|country of (residence|citizenship)|your country|which country|^land\s*\*?\s*$/.test(l)) return a.country;
   if (/full name|legal name/.test(l)) return a.fullName;
-  if (/pronoun/.test(l)) return a.pronouns || 'He/Him';
+  if (/pronoun/.test(l)) return a.pronouns || 'Prefer not to say';
   if (/^address|street address|address line/.test(l)) return a.addressLine1 ? `${a.addressLine1}, ${a.fullAddress}` : a.fullAddress;
   if (/address/.test(l) && !/email|e-mail|web|url|ip address/.test(l)) return a.fullAddress;
   // Attestation "type the words X" fields (anti-AI-in-interview acknowledgements, etc.).
@@ -88,7 +96,22 @@ function valueForLabel(label) {
   // EEO / equal-opportunity DISCLAIMER statements (acknowledge, don't essay them).
   if (/evaluated without regard|protected characteristic|equal (employment )?opportunity|non-?discrimination|without regard to (race|sex|gender|religion|color|national origin|age)/.test(l)) return 'I acknowledge and understand this statement.';
   // Don't fabricate an essay into a URL/username/handle field.
-  if (/github|gitlab|username|portfolio|website|\burl\b|profile link|handle|social media/.test(l)) return a.linkedIn;
+  if (/github|gitlab|username|portfolio|website|\burl\b|profile link|handle|social media/.test(l)) return a.linkedIn || a.portfolio || '';
+  // Fix 8: early-stage startup text field
+  // Set `startupExperience` on the persona to answer this from your own history;
+  // otherwise it goes to the answer bank like any other open question.
+  if (/early.?stage startup|startup.*worked for/i.test(l)) return a.startupExperience || generateAnswer(label, a);
+  // Fix 9: "What interests and excites you about joining [Company]?" — essay with fallback
+  if (/interests.*excites|excites.*joining|why.*interested.*(?:role|position|company)|what.*attracts/i.test(l)) {
+    const _co = (jobMeta && jobMeta.company) || 'your team';
+    return generateAnswer(label, a) || ('I am excited about the opportunity to contribute to ' + _co + '. ' + (a.elevatorPitch || ''));
+  }
+  // Fix 13: pharmacy technician license — throw to skip this job
+  if (/pharmacy technician license|pharm.*tech.*licen/i.test(l)) throw new Error('SKIP: pharmacy technician license required — not held by this persona');
+  // Fix 19: percentage of time spent on X
+  if (/typical day.*percent|percentage.*time.*spent|time.*spent.*percent/i.test(l)) return '25';
+  // Fix 20: employer/company website
+  if (/employer website|company website|employer.*url|company.*url/i.test(l) && !/linkedin|github|portfolio/i.test(l)) return 'https://www.linkedin.com';
   // A YES/NO-phrased question (starts with an auxiliary verb) → "Yes"/"No", NEVER
   // an essay. This must run BEFORE the '?' → essay fallback below.
   if (/^\s*(do|does|did|are|is|was|were|have|has|had|can|could|will|would|should|may|must|shall)\b/i.test(label)) {
@@ -112,22 +135,71 @@ function chooseOption(label, options) {
   if (/government official|public official|politically exposed|\bpep\b|senior (foreign )?(political|government)|hold(s|ing)? (public )?office|elected official|head of state|are you (a |an )?(government|public) (employee|official)|immediate family.*(government|political|official|public office)|family member.*(government|political|public official)|conflict of interest|felony|convicted|criminal (record|history|conviction)/.test(L)) return no();
   // Referral questions → No (we were not referred by a current employee).
   if (/were you referred|referred by (an? )?(employee|someone|current|anyone)|employee referral|did (anyone|someone|a current).*(refer|recruit) you|do you (have|know).*referr/.test(L)) return no();
+  // Fix 6: WOTC survey — answer None / No (all negative)
+  if (/wotc|work opportunity tax credit|tax credit.*survey/i.test(L)) return find(/none|decline|skip|not applicable/i) || find(/i do not/i) || no();
+  // Fix 7: federal/state government employment → No
+  if (/federal government|state.*government|government entity|military service/i.test(L) && /employed|work(ed)?/i.test(L)) return no();
+  // Fix 12: Rockbot values
+  if (/rockbot.*value|value.*resonat/i.test(L)) return find(/win together|be real|think big|own it/i);
+  // Fix 13: pharmacy technician — skip this job
+  if (/pharmacy technician license|pharm.*tech.*licen/i.test(L)) throw new Error('SKIP: pharmacy technician license required — not held by this persona');
+  // Fix 14: "Do you live in one of the listed states?" → Yes (Texas is typically listed)
+  if (/do you live in one of the listed states|listed states.*hire/i.test(L)) return yes();
+  // Fix 15: hybrid work schedule → Yes
+  if (/hybrid work schedule|hybrid.*schedule/i.test(L)) return yes();
+  // Fix 16: work arrangement → prefer Remote, then Hybrid
+  if (/work arrangement|working arrangement/i.test(L)) return find(/remote/i) || find(/hybrid/i);
+  // Fix 17: work authorization
+  if (/work authorization|work auth/i.test(L)) return find(/us citizen|authorized|eligible/i) || find(/no sponsor/i) || yes();
   // "Prepared/submitted by AI?" → No (per user instruction).
   if (/(prepared|submitted|completed|written|generated|created)\b.{0,70}\b(by|with|using|via)\b.{0,25}(ai\b|a\.i\.|gpt|llm|language model|automat|bot|chatgpt|machine)|in whole or in part by an? (ai|automat|language model)|use[ds]?\b.{0,15}(ai|chatgpt|gpt|an ai|a language model|llm).{0,40}(prepar|complet|fill|writ|generat|appl)|\bai[- ]?(generated|prepared|assisted|written|completed)\b/.test(L)) return no();
+  // SMS / texting consent -> Yes.
+  if (/sms|text(ing| message)|receive texts/.test(L) && /consent|opt.?in|agree|permission/.test(L)) {
+    return (a && a.consentSmsRecruiting) === 'No' ? no() : yes();
+  }
+  // RATE GATE. A posting that states its pay and asks whether that is acceptable
+  // gets a truthful answer measured against this persona's floor - NOT a blanket
+  // 'Yes'. Before this, these questions matched nothing, the required dropdown was
+  // left empty, and the submit silently failed with no confirmation page.
+  //
+  // The floor is hourlyMin when set, else salaryMin/2080. Answering No is the
+  // honest outcome for a below-floor role; the job is then refused rather than
+  // applied to at a rate the candidate has said they will not take.
+  if (/(rate|pay|salary|compensation|hourly|per hour|wage)/.test(L)
+      && /(comfortable|acceptable|agree|ok with|okay with|proceed|moving forward|accept|align|work for you)/.test(L)) {
+    const floorHr = Number((a && a.hourlyMin) || ((a && a.salaryMin) ? a.salaryMin / 2080 : 0)) || 0;
+    const mHr = L.match(/\$\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*hour|\/\s*h(?:ou)?r|an hour|hourly)/);
+    const mYr = L.match(/\$\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*year|\/\s*year|annually|a year|k\b)/);
+    let stated = null;
+    if (mHr) stated = parseFloat(mHr[1].replace(/,/g, ''));
+    else if (mYr) stated = parseFloat(mYr[1].replace(/,/g, '')) / 2080;
+    if (stated !== null && floorHr > 0) {
+      console.log(`    rate gate: posting states $${stated.toFixed(2)}/hr, floor $${floorHr.toFixed(2)}/hr -> ${stated >= floorHr ? 'Yes' : 'No'}`);
+      return stated >= floorHr ? yes() : no();
+    }
+  }
+  // Shift / schedule commitments -> Yes (remote-only persona, hours are workable).
+  if (/(schedule|shift|hours|time ?zone|\bpst\b|\best\b|\bcst\b|\bmst\b)/.test(L)
+      && /(able to|can you|willing|commit|meet this|maintain|work these|ongoing basis)/.test(L)) return yes();
   // Start-date dropdowns (month/day/year) → a date ~3 weeks out.
   if (/start date|when.*(start|available)|available.*start|^month$|^day$|^year$|date.*(month|day|year)|(month|day|year).*(start|date)/.test(L)) {
     const d = new Date(Date.now() + 21 * 864e5);
     const MN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     if (/month/.test(L)) return find(new RegExp('^' + MN[d.getMonth()] + '$', 'i')) || find(new RegExp('^0?' + (d.getMonth() + 1) + '$'));
     if (/day/.test(L)) return find(new RegExp('^0?' + d.getDate() + '$'));
-    if (/year/.test(L)) return find(new RegExp('^' + d.getFullYear() + '$')) || find(new RegExp('^' + (d.getFullYear() + 1) + '$'));
+    if (/year/.test(L)) return find(new RegExp('^' + d.getFullYear() + '$')) || find(new RegExp('^' + (d.getFullYear() + 1) + '$')) || find(new RegExp('^' + (d.getFullYear() - 1) + '$')) || options.find((o) => /^\d{4}$/.test(o.trim()) && +o.trim() >= d.getFullYear()) || String(d.getFullYear());
   }
-  if (/pronoun/.test(L)) return find(/he\s*\/\s*him/i) || find(/prefer not/i);
+  // Standalone "year" label — start date year picker
+  if (/^year/.test(L) && options.some((o) => /^\d{4}$/.test(o.trim()))) {
+    const d = new Date(Date.now() + 21 * 864e5);
+    return find(new RegExp('^' + d.getFullYear() + '$')) || find(new RegExp('^' + (d.getFullYear() + 1) + '$')) || options.find((o) => /^\d{4}$/.test(o.trim()) && +o.trim() >= d.getFullYear());
+  }
+  if (/pronoun/.test(L)) return pickEeo('pronouns', options, a);
   if (/sponsor/.test(L)) return no();                                         // needs sponsorship? No
   if (/entitled.*work.*canada|authoriz.*canada|work.*in canada/.test(L)) return no();
   if (/authoriz.*work|legally.*(authorized|entitled).*work|work.*authoriz|eligible to work/.test(L)) return yes();
   if (/which.*state|state.*province|state.*reside|province.*reside|where.*(do you )?reside|state or|^state\b|select your state|your state|home state|state of residence/.test(L)) {
-    return find(new RegExp('^' + a.stateFull + '$', 'i')) || find(/texas|^TX$/i) || find(/none of the above|not listed|^other$/i);
+    return find(new RegExp('^' + a.stateFull + '$', 'i')) || (a.state && find(new RegExp('^\\s*' + a.state + '\\s*$', 'i'))) || find(/none of the above|not listed|^other$/i);
   }
   if (/language/.test(L)) return find(/english/i);
   if (/country/.test(L)) return find(/united states|^usa$|u\.s\.a?\.?$|america/i);
@@ -146,12 +218,13 @@ function chooseOption(label, options) {
     return find(/have not|never|no,? i/i) || no();
   }
   if (/currently.*employ.*(here|at|with)/.test(L)) return find(/have not|no,? i|never/i) || no();
-  if (/transgender/.test(L)) return find(/^no\b/i) || find(/prefer not|decline|do(n'?t| not) wish/i);
-  if (/gender|how do you identify/.test(L)) return find(/^male$|^man$/i) || find(/\bmale\b/i);
-  if (/hispanic|latino/.test(L)) return find(/not hispanic|^no\b/i);
-  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return find(/black or african/i) || find(/^black$/i) || find(/\bblack\b/i);
-  if (/veteran/.test(L)) return find(/not a (protected )?veteran|i am not|^no\b/i) || no();
-  if (/disab/.test(L)) return find(/no,? i (don|do not)|do not have a disab|^no\b/i) || find(/no/i);
+  // EEO: answered from the persona's own fields, never assumed (src/util/eeo.js).
+  if (/transgender/.test(L)) return pickEeo('transgender', options, a);
+  if (/gender|how do you identify/.test(L)) return pickEeo('gender', options, a);
+  if (/hispanic|latino/.test(L)) return pickEeo('hispanic', options, a);
+  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return pickEeo('race', options, a);
+  if (/veteran/.test(L)) return pickEeo('veteran', options, a);
+  if (/disab/.test(L)) return pickEeo('disability', options, a);
   if (/relocat/.test(L)) return no();
   // Self-attestation qualification questions (LinkedIn, years/skills, education,
   // willingness to be in office X days/week) → Yes. The persona is open to hybrid
@@ -161,7 +234,7 @@ function chooseOption(label, options) {
   if (/degree|bachelor|master|education|graduat/.test(L)) return yes();
   if (/physically located|located in (the )?(us|u\.s\.|united states)|reside (in|within) (the )?(us|u\.s|united states)|permanently reside|based in (the )?(us|united states)|live in (the )?(us|united states|us or canada|united states or canada)|live\/work in (the )?(us|united states)|us or canada|authorized.*(work|employment).*(us|united states)/.test(L)) return yes();
   if (/highest (level of )?(education|degree)|degree.*(complete|earned|hold)|education level/.test(L)) return find(new RegExp(a.highestDegree.replace(/[^a-z]/ig, '.?'), 'i')) || find(/master/i) || find(/bachelor/i);
-  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) return find(/computer science|software engineering|computer engineering|information (technology|systems)|^engineering|comp(uter)? sci|information science/i) || find(/business|management/i) || find(/other|not listed|none of/i);
+  if (/discipline|field of study|area of study|course of study|^major|study (area|field)/.test(L)) return find(/computer science|software engineering|computer engineering|information (technology|systems)|^engineering|comp(uter)? sci|information science/i) || find(/business|management/i) || find(/other|not listed|none of/i) || find(new RegExp(a.highestDegreeField || 'Computer Science', 'i')) || 'Computer Science';
   if (/privacy|data processing|gdpr|ccpa|consent|acknowledge|i agree|terms/.test(L)) return yes() || find(/agree|accept|acknowledge|i have read|consent/i);
   if (/do you meet|meet (each|all).*(qualification|requirement)|meet the (basic |minimum )?(qualification|requirement)|read the (job|role)/.test(L)) return yes();
   if (/(do you have|have you|are you).*(experience|years|proficien|familiar|worked|written|maintain|built|develop|deploy|manage|use|use[dn]|implement|configur|design)|at least \d+\s*year|\d+\+?\s*years|minimum.*year|comfortable (with|working)/.test(L)) return yes();
@@ -455,9 +528,37 @@ async function fillDateComboboxes(page, form) {
 //  - input_text / textarea → typed value
 //  - multi_value_single_select → react-select option chosen from schema options
 // Returns { unfilledRequired: [labels] } so the caller can decide whether to skip.
-async function fillFromSchema(page, form, schema) {
+async function fillFromSchema(page, form, schema, a, jobMeta) {
   const unfilledRequired = [];
   if (!schema) return { unfilledRequired };
+  // Resolve every open-ended question ONCE, before any field is filled. Each answer
+  // is written for this persona against this posting; the sync call sites below then
+  // read the results. A question with no honest answer is simply left blank.
+  //
+  // ESSAY SCOPE FIX. This block used to sit INSIDE the loop below and read a free
+  // variable `fields` that does not exist in this scope, so it threw ReferenceError
+  // on every question, was swallowed by the catch, and left EVERY open-ended answer
+  // blank on EVERY Greenhouse application - for all personas, not just this one.
+  // `a` and `jobMeta` are now parameters rather than free variables, and the labels
+  // are collected across all questions, which is what doing this ONCE requires.
+  try {
+    // Only TEXT questions reach the prose model. A multi_value_single_select is a
+    // dropdown, not an essay: sending 'Are you comfortable with $15/hour?' to a
+    // prose model burned a call per question and logged a misleading
+    // '0/3 written (profile insufficient)' that looked like the cause of the
+    // failure. Dropdowns are answered deterministically by chooseOption instead.
+    const _labels = (schema.questions || [])
+      .filter((q) => (q.fields || []).some((f) => f && (f.type === 'input_text' || f.type === 'textarea')))
+      .flatMap((q) => (q.fields || [])
+        .map((f) => (f && (f.label || (f.question && f.question.label))) || '')
+        .concat(q.label ? [q.label] : []))
+      .filter(Boolean);
+    const _st = await answerEngine.prepare(_labels, a, jobMeta);
+    if (_st.asked) console.log(`    essays: ${_st.answered}/${_st.asked} written` + (_st.insufficient ? `, ${_st.insufficient} left blank (profile insufficient)` : '') + (_st.failed ? `, ${_st.failed} failed` : ''));
+  } catch (e) {
+    console.log(`    essays: generation unavailable (${String(e.message || '').slice(0, 60)}) — open questions will be left blank`);
+  }
+
   for (const q of schema.questions) {
     for (const f of q.fields || []) {
       if (f.type === 'input_text' || f.type === 'textarea') {
@@ -466,10 +567,12 @@ async function fillFromSchema(page, form, schema) {
         if (await el.inputValue().catch(() => '')) continue;
         // greenhouse map → the FULLER shared text map (covers legal first/last
         // name, degree, employer, school, etc. that valueForLabel omits) → learned.
-        let val = valueForLabel(q.label) || textValueForLabel(q.label, a) || getLearned(q.label);
+        let val = valueForLabel(q.label, jobMeta) || textValueForLabel(q.label, a) || getLearned(q.label);
         if (!val && q.required) {                                   // NEW question → think + save
-          val = /\?|why|describe|tell us|explain|how |what |cover letter|additional|experience|background|relevant|in your own words|elaborate|provide (details|examples)|walk us through|share (an|your|some)/i.test(q.label) ? generateAnswer(q.label, a) : 'N/A';
-          saveLearned(q.label, val);
+          // Fix 21: use LLM for ALL unknown required text fields (not just essay-like ones)
+          val = generateAnswer(q.label, a) || ('N/A');
+          if (val && val !== 'N/A') saveLearned(q.label, val);
+          else saveLearned(q.label, val);
         }
         if (val) await el.fill(String(val).slice(0, 1000)).catch(() => {});
       } else if (f.type === 'multi_value_single_select') {
@@ -486,6 +589,31 @@ async function fillFromSchema(page, form, schema) {
         if (process.env.DBG_SELECT) console.log(`   [schema-select] "${q.label}" opts=[${opts.join('|')}] pick="${pick}"`);
         const ok = await fillSelect(page, form, f.name, pick);
         if (!ok && q.required) unfilledRequired.push({ name: f.name, label: q.label, opts });
+      } else if (f.type === 'multi_value_multi_select') {
+        const opts = (f.values || []).map((v) => ({ id: v.id, label: String(v.label) }));
+        if (!opts.length) continue;
+        const ql = q.label.toLowerCase();
+        const isSensitive = /gender|race|ethnic|veteran|disab|hispanic|sexual|government|felony|criminal/.test(ql);
+        let toCheck = [];
+        if (/shift|time.?zone|hours|schedule|availab/.test(ql)) {
+          toCheck = opts;
+        } else if (/experience|skill|software|tool|platform|technology|language/.test(ql)) {
+          toCheck = opts.filter((o) => /qa|quality|test|automation|selenium|playwright|cypress|jira|python|javascript|sql|manual|agile|scrum|customer|support|zendesk|freshdesk|salesforce|servicenow|helpdesk|slack|excel|windows|linux|mac/i.test(o.label));
+          if (!toCheck.length && q.required && !isSensitive) toCheck = [opts[0]];
+        } else if (/office|location|site/.test(ql)) {
+          toCheck = opts.filter((o) => /remote|none|n\/a/i.test(o.label));
+        } else if (!isSensitive && q.required) {
+          toCheck = [opts[0]];
+        }
+        for (const opt of toCheck) {
+          try {
+            const cbEl = await form.$('input[type="checkbox"][value="' + String(opt.id) + '"]');
+            if (cbEl && !(await cbEl.isChecked().catch(() => false))) {
+              await cbEl.check({ force: true }).catch(() => {});
+            }
+          } catch {}
+        }
+        if (process.env.DBG_SELECT) console.log('   [multi-check] "' + q.label.slice(0,40) + '" checked ' + toCheck.length + '/' + opts.length + ' opts');
       }
     }
   }
@@ -514,7 +642,9 @@ function formCtx(page) {
   return page;
 }
 
+const trace = require("../util/trace");
 async function applyGreenhouse(page, jobMeta) {
+  trace.stage("greenhouse");
   // CareerPuck is just Greenhouse's candidate-facing SPA. The classic Greenhouse
   // embed form renders the real, fillable form for the same job — redirect to it
   // and proceed with the normal flow.
@@ -610,27 +740,18 @@ async function applyGreenhouse(page, jobMeta) {
   await fillLocation(page, form, a).catch(() => {});
 
   // Resume upload — Greenhouse forms vary (Attach button + file chooser, or a
-  // hidden/direct <input type=file>). Try the button-chooser, then ALWAYS also
-  // set the file input directly, then verify a file is attached.
-  const resumeAttached = async () => form.evaluate(() => {
-    const fi = document.querySelector('input[type="file"]');
-    if (fi && fi.files && fi.files.length) return true;
-    return /\.(pdf|docx?|rtf|txt)\b/i.test((document.querySelector('[class*="chosen"],[class*="attached"],[class*="file-name"],[class*="filename"],[data-field="resume"]') || {}).innerText || '');
-  }).catch(() => false);
-  for (const t of ['Attach', 'Upload', 'Add file', 'Choose file', 'Upload file']) {
-    if (await resumeAttached()) break;
-    const btn = await form.$(`button:has-text("${t}")`);
-    if (!btn) continue;
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null), btn.click().catch(() => {})]);
-    if (chooser) { await chooser.setFiles(a.resumePath).catch(() => {}); await page.waitForTimeout(1500); }
-  }
-  if (!(await resumeAttached())) {
-    for (const fi of await form.$$('input[type="file"]')) {
-      await fi.setInputFiles(a.resumePath).catch(() => {});
-      await page.waitForTimeout(1200);
-      if (await resumeAttached()) break;
-    }
-  }
+  // hidden/direct <input type=file>), so attachResume walks a strategy ladder and
+  // then CONFIRMS the form registered the file.
+  //
+  // This used to be a hand-rolled ladder where every upload call ended in
+  // `.catch(() => {})` and the attachment check only chose the next strategy. A
+  // missing resume therefore fell through to submit and the ledger recorded a
+  // success. Now an unusable file or an unconfirmed upload returns Error here and
+  // the form is never submitted. `form` (not `page`) is the scope because the
+  // Greenhouse embed lives in an iframe.
+  trace.stage("greenhouse:resume");
+  const up = await attachResume(page, form, a.resumePath);
+  if (!up.ok) return up.result;
 
   // Cover letter — a REQUIRED cover letter (textarea OR file) blocks submit. The
   // generic essay loop misses it because Greenhouse hides the paste box behind an
@@ -639,8 +760,13 @@ async function applyGreenhouse(page, jobMeta) {
   // tailored letter.
   const coverTextarea0 = await form.$('textarea[name*="cover_letter" i], textarea[id*="cover_letter" i], textarea[aria-label*="cover letter" i]').catch(() => null);
   const coverFileInput = await form.$('input[type="file"]#cover_letter, input[type="file"][name*="cover" i], input[type="file"][id*="cover" i]').catch(() => null);
-  if (coverTextarea0 || coverFileInput || requiredLabels.some((l) => /cover letter/i.test(l))) {
-    const clText = coverLetterText(jobMeta);
+  // ONLY when the form requires one. A cover-letter field that merely exists is left
+  // empty on purpose: a letter that is not written for this job reads as mass-sent and
+  // costs more than the empty field does. See src/util/cover-letter.js.
+  const coverRequired = requiredLabels.some((l) => /cover letter/i.test(l));
+  if (coverRequired && (coverTextarea0 || coverFileInput)) {
+    const clText = await coverLetterFor(a, jobMeta, { required: true });
+    if (!clText) return null;
     // Reveal a hidden paste box if there's a toggle near "cover letter".
     for (const t of ['Enter manually', 'Paste', 'Write', 'Type', 'Manually']) {
       const btn = await form.$(`button:has-text("${t}"), a:has-text("${t}")`).catch(() => null);
@@ -654,13 +780,43 @@ async function applyGreenhouse(page, jobMeta) {
       if (!(await ta.inputValue().catch(() => ''))) await ta.fill(clText).catch(() => {});
     } else if (coverFileInput) {
       // File cover letter: write a temp .txt and upload it.
+      //
+      // Same rule as the resume — a swallowed failure here produced an application
+      // whose required cover letter was silently absent. Two differences: the file
+      // is generated, so `verifyMode: 'exists'` skips the %PDF- check but still
+      // rejects an unwritable or 0-byte temp file; and severity depends on whether
+      // Greenhouse marks the field required. Required and unattached blocks the
+      // submission. Optional and unattached records friction and continues, because
+      // failing an otherwise complete application over an optional extra would cost
+      // more good applications than it saves bad ones.
+            let tmp = '';
       try {
         const fs = require('fs'); const os = require('os'); const path = require('path');
-        const tmp = path.join(os.tmpdir(), `cover-${((jobMeta && jobMeta.company) || 'job')}-${a.persona}.txt`.replace(/[^\w.-]/g, '_'));
+        tmp = path.join(os.tmpdir(), `cover-${((jobMeta && jobMeta.company) || 'job')}-${a.persona}.txt`.replace(/[^\w.-]/g, '_'));
         fs.writeFileSync(tmp, clText);
-        await coverFileInput.setInputFiles(tmp).catch(() => {});
-        await page.waitForTimeout(1200);
-      } catch {}
+      } catch (e) {
+        const reason = `Cover letter could not be written to a temp file: ${(e.message || '').slice(0, 120)}`;
+        if (coverRequired) return { status: 'Error', reason };
+        console.log(`    ⚠ ${reason} — cover letter is optional, continuing.`);
+        tmp = '';
+      }
+      if (tmp) {
+        trace.stage("greenhouse:cover-letter");
+        const cl = await attachResume(page, form, tmp, {
+          kind: 'cover-letter',
+          verifyMode: 'exists',
+          selectors: ['input[type="file"]#cover_letter', 'input[type="file"][name*="cover" i]', 'input[type="file"][id*="cover" i]'],
+          buttonTexts: [],
+          // The resume is already attached by now. Confirming document-wide would
+          // read the resume's input (or its "chosen file" container) as proof the
+          // cover letter arrived, so keep confirmation on the cover inputs only.
+          confirmStrict: true,
+        });
+        if (!cl.ok) {
+          if (coverRequired) return { ...cl.result, reason: cl.result.reason.replace(/^Resume/, 'Cover letter') };
+          console.log(`    ⚠ ${cl.result.reason} — cover letter is optional, continuing.`);
+        }
+      }
     }
   }
 
@@ -743,16 +899,18 @@ async function applyGreenhouse(page, jobMeta) {
   // dropdowns) by its EXACT field name using the questions API. This is the
   // deterministic core — it handles the required work-auth/state/pronouns/
   // "how did you hear"/previously-employed selects the heuristics above miss.
-  const { unfilledRequired } = await fillFromSchema(page, form, schema);
+  const { unfilledRequired } = await fillFromSchema(page, form, schema, a, jobMeta);
 
   // EEO react-select dropdowns (required → block submit if unfilled).
+  // The option is chosen by pickEeo from the persona's own answers.
   const eeoTargets = [
-    { match: /gender/i, pick: /^male$/i },
-    { match: /are you hispanic|hispanic\/latino|hispanic or latino/i, pick: /^no$|not hispanic/i },
-    { match: /\brace\b|ethnicity/i, pick: /black or african american/i },
-    { match: /veteran/i, pick: /not a (protected )?veteran|i am not/i },
-    { match: /disab/i, pick: /no, i (don.t|do not)|i (don.t|do not) have a disability|^no\b/i },
+    { match: /gender/i, kind: 'gender' },
+    { match: /are you hispanic|hispanic\/latino|hispanic or latino/i, kind: 'hispanic' },
+    { match: /\brace\b|ethnicity/i, kind: 'race' },
+    { match: /veteran/i, kind: 'veteran' },
+    { match: /disab/i, kind: 'disability' },
   ];
+  const OPTION_SEL = '[role="option"], .select__option, [id*="option"]';
   for (const cb of await form.$$('input[role="combobox"]')) {
     if (await cb.inputValue().catch(() => '')) continue;
     const label = await cb.evaluate(el => { let p = el.parentElement; for (let i = 0; i < 6 && p; i++) { const t = p.innerText?.slice(0, 200); if (t && t.trim()) return t; p = p.parentElement; } return ''; }).catch(() => '');
@@ -760,13 +918,13 @@ async function applyGreenhouse(page, jobMeta) {
     if (!tgt) continue;
     await cb.click().catch(() => {});
     await page.waitForTimeout(350);
-    const picked = await form.evaluate((pickSrc) => {
-      const re = new RegExp(pickSrc, 'i');
-      const opts = Array.from(document.querySelectorAll('[role="option"], .select__option, [id*="option"]'));
-      const hit = opts.find(o => re.test(o.textContent || ''));
+    const optTexts = await form.evaluate((s) => Array.from(document.querySelectorAll(s)).map(o => (o.textContent || '').trim()), OPTION_SEL).catch(() => []);
+    const want = pickEeo(tgt.kind, optTexts.filter(Boolean), a);
+    const picked = want ? await form.evaluate(([s, w]) => {
+      const hit = Array.from(document.querySelectorAll(s)).find(o => (o.textContent || '').trim() === w);
       if (hit) { hit.scrollIntoView({ block: 'center' }); hit.click(); return hit.textContent.slice(0, 40); }
       return null;
-    }, tgt.pick.source).catch(() => null);
+    }, [OPTION_SEL, want]).catch(() => null) : null;
     if (!picked) await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(200);
   }
@@ -776,12 +934,16 @@ async function applyGreenhouse(page, jobMeta) {
     const label = await sel.evaluate(el => (el.closest('div,fieldset')?.innerText || '').slice(0, 200)).catch(() => '');
     const cur = await sel.evaluate(el => el.value).catch(() => '');
     if (cur && !/^$|select|choose/i.test(cur)) continue;
-    const pick = async (re) => { const opts = await sel.$$eval('option', os => os.map(o => o.textContent.trim())); const m = opts.find(o => re.test(o)); if (m) await sel.selectOption({ label: m }).catch(() => {}); };
-    if (/gender/i.test(label)) await pick(/^male$/i);
-    else if (/hispanic/i.test(label)) await pick(/^no|not hispanic/i);
-    else if (/\brace\b|ethnicity/i.test(label)) await pick(/black or african american/i);
-    else if (/veteran/i.test(label)) await pick(/not a (protected )?veteran|i am not/i);
-    else if (/disab/i.test(label)) await pick(/no,? i (don.t|do not)|^no\b/i);
+    const pick = async (kind) => {
+      const opts = (await sel.$$eval('option', os => os.map(o => o.textContent.trim()))).filter(o => o && !/^(select|choose)\b/i.test(o));
+      const m = pickEeo(kind, opts, a);
+      if (m) await sel.selectOption({ label: m }).catch(() => {});
+    };
+    if (/gender/i.test(label)) await pick('gender');
+    else if (/hispanic/i.test(label)) await pick('hispanic');
+    else if (/\brace\b|ethnicity/i.test(label)) await pick('race');
+    else if (/veteran/i.test(label)) await pick('veteran');
+    else if (/disab/i.test(label)) await pick('disability');
   }
 
   // Start-date date-picker comboboxes (month/day/year — not in schema).
@@ -799,6 +961,86 @@ async function applyGreenhouse(page, jobMeta) {
 
   // Safety net: fill any remaining required text/checkbox a custom question missed.
   await fillRemainingRequired(form).catch(() => {});
+
+  // Fix 5: Privacy Acknowledgement checkbox — check it if present and unchecked.
+  try {
+    const privacyCbs = await form.$$('input[type="checkbox"]');
+    for (const pcb of privacyCbs) {
+      const nearLabel = await pcb.evaluate((el) => {
+        let p = el.parentElement;
+        for (let i = 0; i < 6 && p; i++) { const t = p.innerText || ''; if (/privacy|acknowledge|consent|agree/i.test(t)) return t.slice(0, 100); p = p.parentElement; }
+        const n = el.name || el.id || '';
+        return /privacy|acknowledge|consent|agree/i.test(n) ? n : '';
+      }).catch(() => '');
+      if (/privacy|acknowledge|consent|agree/i.test(nearLabel)) {
+        if (!(await pcb.isChecked().catch(() => true))) await pcb.check({ force: true }).catch(() => {});
+      }
+    }
+  } catch {}
+
+  // DOM-level multi-checkbox fallback: catch shift/timezone/experience checkbox groups
+  // that the schema-based handler missed (some forms render these as custom HTML widgets).
+  try {
+    const fieldsets = await form.$$('fieldset, [role="group"], [class*="checkbox-group"], [class*="multi-select"]').catch(() => []);
+    for (const fs of fieldsets) {
+      const legend = await fs.evaluate((el) => {
+        const l = el.querySelector('legend, label, [class*="label"]');
+        return (l ? l.innerText : el.getAttribute('aria-label') || '').trim().toLowerCase();
+      }).catch(() => '');
+      if (!legend) continue;
+      // Only auto-check for shifts, timezones, schedules, availability
+      if (/shift|time.?zone|hours|schedule|availab|willing to work/.test(legend)) {
+        const cbs = await fs.$$('input[type="checkbox"]').catch(() => []);
+        for (const cb of cbs) {
+          if (!(await cb.isChecked().catch(() => true))) {
+            await cb.check({ force: true }).catch(() => {});
+          }
+        }
+      }
+      // Experience/skills: check matching ones
+      if (/experience|skill|software|tool|which of the following/.test(legend)) {
+        const cbs = await fs.$$('input[type="checkbox"]').catch(() => []);
+        for (const cb of cbs) {
+          const lbl = await cb.evaluate((el) => {
+            const p = el.parentElement;
+            return (p ? p.innerText : el.value || '').trim().toLowerCase();
+          }).catch(() => '');
+          if (/customer|support|zendesk|salesforce|servicenow|jira|freshdesk|excel|windows|phone|email|chat|ticket|helpdesk|slack|crm|qa|test|automation|python|sql/i.test(lbl)) {
+            if (!(await cb.isChecked().catch(() => true))) {
+              await cb.check({ force: true }).catch(() => {});
+            }
+          }
+        }
+        // If nothing matched and it's required, check the first option
+        const anyChecked = await fs.$('input[type="checkbox"]:checked').catch(() => null);
+        if (!anyChecked) {
+          const first = await fs.$('input[type="checkbox"]').catch(() => null);
+          if (first) await first.check({ force: true }).catch(() => {});
+        }
+      }
+    }
+  } catch {}
+
+  // Also scan for any error messages containing "select" and try to fix by checking visible unchecked boxes
+  try {
+    const errors = await form.$$('[class*="error" i], [class*="invalid" i], [role="alert"]').catch(() => []);
+    for (const err of errors) {
+      const errText = await err.evaluate((el) => el.innerText.trim().toLowerCase()).catch(() => '');
+      if (/select|check|shift|timezone|experience/.test(errText)) {
+        // Find the nearest checkbox group and check all
+        const parent = await err.evaluateHandle((el) => el.closest('fieldset, [class*="question"], [class*="field"]') || el.parentElement).catch(() => null);
+        if (parent) {
+          const cbs = await parent.$$('input[type="checkbox"]').catch(() => []);
+          for (const cb of cbs) {
+            if (!(await cb.isChecked().catch(() => true))) {
+              await cb.check({ force: true }).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+
   // Proof-read: fix obviously-wrong answers (e.g. a location stuffed into a
   // referral/"who referred you" field) before submitting.
   await proofread(form).catch(() => {});
@@ -810,6 +1052,21 @@ async function applyGreenhouse(page, jobMeta) {
   await handleCaptcha(page, form).catch(() => {});
 
   // ── Submit ──
+
+  // ── Pre-submit review: ground every answer against the persona ──────────
+  //
+  // The last look before an irreversible action. Reads the filled form back out of the
+  // DOM and checks it against the persona: identity fields deterministically (always),
+  // then a model review of every answer when one is reachable. A finding it can ground is
+  // corrected in place; one it cannot blocks the submit and raises an attention item, so
+  // the job stays actionable rather than being sent wrong.
+  //
+  // Before the dry-run stop on purpose: a dry run should exercise the review too, which is
+  // how the quality is inspectable before anything goes live.
+  trace.stage("greenhouse:review");
+  const reviewBlock = await gateBeforeSubmit(page, form, { persona: a, jobMeta });
+  if (reviewBlock) return reviewBlock;
+
   const submitBtn = await form.$('button:has-text("Submit application"), button[type="submit"]');
   if (!submitBtn) return { status: 'Error', reason: 'Submit button not found' };
 
@@ -825,6 +1082,13 @@ async function applyGreenhouse(page, jobMeta) {
         : 'all required filled — screenshot ' + fname,
     };
   }
+  // Greenhouse gates submit behind an emailed code. Unlike lever/ashby/workable,
+  // which verify AFTER submitting, the button here does nothing until the code is
+  // entered — so this runs before the click. It is also after the review gate on
+  // purpose: the code expires, so it is fetched as late as possible.
+  const verifyBlock = await handleGreenhouseVerification(page, form, { jobMeta });
+  if (verifyBlock) return verifyBlock;
+
   await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
   await page.waitForTimeout(300);
   await submitBtn.click({ timeout: 10000 }).catch(async () => {
@@ -836,6 +1100,31 @@ async function applyGreenhouse(page, jobMeta) {
   // because some layouts (and a degraded long session) don't surface a text we
   // matched, even though the submit succeeded — that produced false "No
   // confirmation" errors. The form being GONE with no validation error == success.
+  // SECOND PASS, AFTER THE CLICK (2026-09-14). Greenhouse emails the code IN
+  // RESPONSE to the submit, then swaps the form for a code prompt. The call
+  // before the click therefore always ran too early: no prompt existed yet, so it
+  // returned null without logging a thing, the click went in, the code landed in
+  // the inbox, and nothing ever typed it. Eight codes sat unread while every one
+  // of these jobs reported No confirmation page after submit. Run the same
+  // detector again now that the prompt can actually be on screen.
+  await page.waitForTimeout(2500);
+  const verifyAfter = await handleGreenhouseVerification(page, form, { jobMeta });
+  if (verifyAfter) return verifyAfter;
+
+  // ENTERING THE CODE IS NOT SUBMITTING. The first click was consumed by the
+  // send-me-a-code step, so the form is still on screen with the code now filled
+  // in and the application still unsent. That is why accuweather, nice and
+  // charterup logged code entered successfully and then No confirmation page
+  // after submit in the same breath. Click submit again if it is still there; if
+  // the application did go through, the button is gone and this is a no-op.
+  const submitAgain = await form.$(`button:has-text("Submit application"), button[type="submit"]`).catch(() => null);
+  if (submitAgain && (await submitAgain.isVisible().catch(() => false))) {
+    console.log(`    submitting again now that the code is entered`);
+    await submitAgain.scrollIntoViewIfNeeded().catch(() => {});
+    await submitAgain.click({ timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+  }
+
   const CONFIRM = /thank you for applying|application (was )?(received|submitted|complete)|your application has been (submitted|received)|submitted your application|we(?:'| ha)ve received your application|thanks for applying|application complete|successfully (submitted|applied|received)|you have (already )?applied/i;
   for (let i = 0; i < 12; i++) {
     await page.waitForTimeout(2000);
@@ -862,6 +1151,24 @@ async function applyGreenhouse(page, jobMeta) {
     const e = document.querySelector('.field_with_errors, [aria-invalid="true"], .error, [class*="error"]');
     return e ? (e.innerText || '').slice(0, 160) : '';
   }).catch(() => '');
+  // Fix 22: "We couldn't submit your application" — take screenshot, scroll to find errors, retry once.
+  const pageBodyFinal = await page.evaluate(() => document.body.innerText.slice(0, 2000)).catch(() => '');
+  if (/couldn.?t submit|could not submit|we couldn/i.test(pageBodyFinal) || /couldn.?t submit|could not submit/i.test(err)) {
+    console.log('    [Fix22] Generic submit error detected — scrolling for red fields and retrying in 3s');
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+    await page.waitForTimeout(3000);
+    // Scroll back to first error if visible
+    await form.evaluate(() => { const e = document.querySelector('[aria-invalid="true"], .field_with_errors, [class*="error"]'); if (e) e.scrollIntoView({ block: 'center' }); }).catch(() => {});
+    // Retry submit once
+    const retryBtn = await form.$('button:has-text("Submit application"), button[type="submit"]').catch(() => null);
+    if (retryBtn && (await retryBtn.isVisible().catch(() => false))) {
+      await retryBtn.click({ timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(4000);
+      const retryBody = await form.evaluate(() => document.body.innerText.slice(0, 2500)).catch(() => '');
+      const retryPage = await page.evaluate(() => document.body.innerText.slice(0, 2500)).catch(() => '');
+      if (CONFIRM.test(retryBody + ' ' + retryPage)) return { status: 'Applied', reason: 'Applied on retry after submit error' };
+    }
+  }
   if (err) return { status: 'Error', reason: 'Validation: ' + err.replace(/\s+/g, ' ') };
   if (stillUnfilled.length) {
     return { status: 'Error', reason: 'Unfilled required: ' + stillUnfilled.slice(0, 4).join(' | ').slice(0, 160) };

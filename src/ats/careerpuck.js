@@ -5,7 +5,9 @@
 // handles the careerpuck→embed redirect itself).
 const { applyGreenhouse } = require('./greenhouse');
 
+const trace = require("../util/trace");
 async function applyCareerpuck(page, jobMeta) {
+  trace.stage("careerpuck");
   const url = page.url();
   const m = url.match(/careerpuck\.com\/job-board\/([^/]+)\/job\/(\d+)/);
   if (m) {

@@ -33,8 +33,28 @@ function readTracked(file) {
   try { return fs.readFileSync(path.join(ROOT, file), 'utf8'); } catch { return null; }
 }
 
+// Tracked-file rules that a PRIVATE data repo is allowed to break.
+//
+// The private repo exists to hold this installation's real data, and another agent that
+// clones it needs the resumes and the ledger to do anything useful with resume
+// verification, tailoring or duplicate checks. Marked private-only so the same rules stay
+// FATAL for the public template, which is the repo that must never carry them.
+const PRIVATE_DATA_ALLOWED = [
+  [/^\.state\//, 'agent state directory (application ledger)'],
+  [/^Resume\/.*\.(pdf|docx)$/i, 'resume file'],
+  [/^cover-letters\/.*\.(txt|md)$/, 'generated cover letter'],
+  [/^data\/verified-answers\.json$/, 'verified answers (resume-derived facts)'],
+];
+
 const MUST_NOT_BE_TRACKED = [
   [/^\.state\//, 'agent state directory (application ledger)'],
+  // NEVER private-allowed, on two independent grounds:
+  //   1. A profile is live LinkedIn/Google/ATS session cookies. In a repo, anyone with
+  //      read access — including any agent that clones it — holds those logged-in
+  //      sessions. That is account takeover, not a privacy nit.
+  //   2. It would not even work: a profile carries the OS and device fingerprint of the
+  //      machine that made it, and a replayed one is exactly what CAPTCHA scoring flags.
+  //      Each machine logs in once locally, by design.
   [/^browser-profile[^/]*\/(?!\.gitkeep$)./, 'browser profile (session cookies)'],
   [/^Resume\/.*\.(pdf|docx)$/i, 'resume file'],
   [/^cover-letters\/.*\.(txt|md)$/, 'generated cover letter'],
@@ -48,7 +68,12 @@ const MUST_NOT_BE_TRACKED = [
   [/\.(bak|saved)$|\.bak-[^/]+$/i, 'backup snapshot'],
 ];
 
-const REQUIRED_IGNORES = ['.state/', 'browser-profile-*/', 'node_modules/', '.env'];
+// Ignore rules that must be present. `.state/` is required only in a publishable repo:
+// the private data repo tracks its ledger on purpose so another machine (or another
+// agent) can clone it. Browser profiles and .env are required in BOTH — those are the two
+// that are dangerous rather than merely private.
+const REQUIRED_IGNORES = ['browser-profile-*/', 'node_modules/', '.env'];
+const REQUIRED_IGNORES_PUBLIC = ['.state/'];
 
 // Deliberately narrow so placeholders (<you@example.com>, user@example.com,
 // noreply@…) do not trip it.
@@ -118,16 +143,31 @@ function populated(file, kind, text) {
   return null;
 }
 
+const PRIVATE_MARKER = '.private-data-repo';
+// Hoisted above the tracked-file checks: they now branch on it, and a const used before
+// its declaration is a TDZ error rather than a falsy default.
+const isPrivateDataRepo = tracked.includes(PRIVATE_MARKER);
+
 const blocking = [];
 const publish = [];
 const history = [];
 
 for (const [re, what] of MUST_NOT_BE_TRACKED) {
-  for (const f of tracked) if (re.test(f)) blocking.push(`${f} is tracked by git (${what})`);
+  const privateOk = PRIVATE_DATA_ALLOWED.some(([p]) => String(p) === String(re));
+  for (const f of tracked) {
+    if (!re.test(f)) continue;
+    if (isPrivateDataRepo && privateOk) {
+      // Expected here, and reported so it is never silent — this repo IS the data.
+      publish.push(`${f} is tracked (${what}) — private data repo; must never reach the template`);
+      continue;
+    }
+    blocking.push(`${f} is tracked by git (${what})`);
+  }
 }
 
 const gitignore = readTracked('.gitignore') || '';
-for (const rule of REQUIRED_IGNORES) {
+const requiredIgnores = isPrivateDataRepo ? REQUIRED_IGNORES : [...REQUIRED_IGNORES, ...REQUIRED_IGNORES_PUBLIC];
+for (const rule of requiredIgnores) {
   if (!gitignore.split('\n').some((l) => l.trim() === rule)) blocking.push(`.gitignore is missing the rule: ${rule}`);
 }
 
@@ -159,8 +199,6 @@ for (const f of tracked) {
 // The marker is read from the TREE BEING AUDITED, so `--ref <public-ref>` run
 // from inside the private repo is still judged strictly — the public ref does not
 // carry the marker.
-const PRIVATE_MARKER = '.private-data-repo';
-const isPrivateDataRepo = tracked.includes(PRIVATE_MARKER);
 
 // `publishing` means we are judging what a commit would expose to the public.
 const publishing = (!!ref || strict) && !isPrivateDataRepo;

@@ -24,11 +24,22 @@ const has = (cmd, args = ['--version']) => {
   try { run(cmd, args); return true; } catch (e) { return e.status !== undefined && e.code !== 'ENOENT'; }
 };
 
-function backend() {
-  if (process.env.APPLY_AGENT_SECRET_BACKEND) return process.env.APPLY_AGENT_SECRET_BACKEND;
-  if (process.platform === 'darwin') return 'keychain';
-  if (process.platform === 'win32') return 'dpapi';
-  if (process.platform === 'linux' && has('secret-tool', ['--help'])) return 'secret-service';
+// Which backend is in play. `probe` lets a caller ask the question about a machine
+// other than this one — doctor reports the backend for the host it is inspecting,
+// and a test can describe a Linux box with no secret-tool. Defaults are the real
+// process, so every existing caller is unaffected and the precedence rules stay
+// defined in exactly one place.
+function backend(probe = {}) {
+  const platform = probe.platform || process.platform;
+  const env = probe.env || process.env;
+  const secretToolPresent = probe.hasSecretTool === undefined
+    ? () => has('secret-tool', ['--help'])
+    : () => probe.hasSecretTool === true;
+
+  if (env.APPLY_AGENT_SECRET_BACKEND) return env.APPLY_AGENT_SECRET_BACKEND;
+  if (platform === 'darwin') return 'keychain';
+  if (platform === 'win32') return 'dpapi';
+  if (platform === 'linux' && secretToolPresent()) return 'secret-service';
   return 'file';
 }
 

@@ -6,7 +6,7 @@
 //
 // Honors the user's constraints via env: REMOTE_ONLY=1 (no hybrid) and
 // ALLOW_BIG=1 (mid/large companies allowed — user relaxed this to reach 250).
-// Personal-exclude (juniper square, akuity) is always enforced in discovery.
+// Personal-exclude (data/personal-exclude.json) is always enforced in discovery.
 //
 //   TARGET=576 GOAL_DATE=2026-06-30 node src/autopilot.js
 const { spawnSync } = require('child_process');

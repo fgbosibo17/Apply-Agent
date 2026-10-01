@@ -13,6 +13,12 @@
 //
 // HARD RULE: never mix identities on one application — resume header, form
 // answers, and any logged-in job-board account must all belong to one persona.
+//
+// ONE BROWSER PROFILE PER ACCOUNT, NOT PER PERSONA. Each persona's profile dir is
+// derived at the bottom of this file from `profileKey` (default: the persona key).
+// Two personas on one identity (primary + adjacent below) set the same profileKey,
+// so the account is signed in once. Two personas on one profile can never run at
+// the same time; src/core/locks.js enforces that with a clear refusal.
 // ──────────────────────────────────────────────────────────────────────────
 
 const path = require('path');
@@ -53,6 +59,7 @@ const common = {
   willingToRelocate: 'No',
 
   consentBackgroundCheck: 'Yes',
+  consentSmsRecruiting: 'Yes',         // "may we text you about this application?"
   consentDrugTest: 'Yes',
   hasNonCompete: 'No',
   is18OrOlder: 'Yes',
@@ -60,6 +67,8 @@ const common = {
   howDidYouHear: 'LinkedIn',
 
   // ── EEO / demographics (voluntary) ── set or use "Prefer not to say"
+  // Forms are answered from THESE values only (src/util/eeo.js). A field left as a
+  // <placeholder> picks the form's "decline to answer" option — never a guess.
   gender: '<Male | Female | Non-binary | Prefer not to say>',
   pronouns: '<He/Him | She/Her | They/Them>',
   ethnicity: '<e.g. Black or African American | Prefer not to say>',
@@ -90,9 +99,10 @@ const common = {
 // ─── Identity A (example: your main identity) ───────────────────────────────
 // Each identity = one email/phone/LinkedIn + its OWN browser profile folder.
 // The browser profile stores logins so you only sign in once (gitignored).
+// browserProfile is NOT set here — it is derived per persona at the bottom of
+// this file from `profileKey`.
 const identityA = {
   identity: 'primary',
-  browserProfile: path.resolve(__dirname, '..', 'browser-profile-primary'),
   firstName: '<FILL_ME_IN>',
   fullName: '<First Last>',
   email: '<you@example.com>',
@@ -110,7 +120,6 @@ const identityA = {
 // one identity, point every persona at identityA and delete this.
 const identityB = {
   identity: 'secondary',
-  browserProfile: path.resolve(__dirname, '..', 'browser-profile-secondary'),
   firstName: '<FILL_ME_IN>',
   fullName: '<First Last>',
   email: '<you2@example.com>',
@@ -159,6 +168,24 @@ const personas = {
     // a skill listed here → your real total years; a skill NOT listed → 0 (never
     // claims experience you don't have). Leave '' to fall back to matchKeywords.
     skills: '',
+
+    // ── OPTIONAL extras ──────────────────────────────────────────────────────
+    // Several near-identical base resumes, picked by JOB TITLE (first match wins,
+    // no match falls back to resumePath). Title-only is deliberate: a JD body
+    // mentions enough keywords to send the wrong variant to every posting.
+    // resumeVariants: [
+    //   { key: 'support', match: /help\s?desk|service desk|technical support/i,
+    //     pdf: path.join(RESUME_DIR, '<Your_Support_Resume.pdf>'),
+    //     docx: path.join(RESUME_DIR, '<Your_Support_Resume.docx>') },
+    // ],
+    //
+    // Hourly floor for postings that state an hourly rate ("Are you comfortable
+    // with $15/hour?"). Defaults to salaryMin / 2080 when unset.
+    // hourlyMin: 45,
+    //
+    // Your own answer to "have you worked at an early-stage startup?" — left
+    // unset, it goes to the answer bank like any other open question.
+    // startupExperience: '<1-2 sentences, true to your resume>',
   },
 
   // EXAMPLE persona #2 — an ADJACENT track sharing identity A (different resume
@@ -167,6 +194,8 @@ const personas = {
     ...common,
     ...identityA,
     persona: 'adjacent',
+    // Same identity as primary → same logins → same browser profile directory.
+    profileKey: 'primary',
     resumePath: path.join(RESUME_DIR, '<Your_Adjacent_Resume.pdf>'),
     resumeDocx: path.join(RESUME_DIR, '<Your_Adjacent_Resume.docx>'),
     currentEmployer: '<Current Employer>',
@@ -206,6 +235,57 @@ const personas = {
   },
 };
 
+// ─── One browser profile per ACCOUNT, derived from profileKey ────────────────
+// This OVERRIDES any browserProfile an identity carried and is the single source
+// of truth for the whole repo. Deriving it instead of writing it by hand is
+// deliberate: free-form profile names passed through env vars are how stray
+// profile directories (and gigabytes of disk) accumulate. Everything that needs a
+// profile path goes through profileDirFor()/profileKeyFor() below.
+const PROFILE_PREFIX = 'browser-profile-';
+for (const [key, persona] of Object.entries(personas)) {
+  persona.profileKey = persona.profileKey || key;
+  persona.browserProfile = path.resolve(__dirname, '..', PROFILE_PREFIX + persona.profileKey);
+}
+
+// ─── Parallel sessions (optional) ────────────────────────────────────────────
+// Run one persona as N concurrent sessions: same identity and answers, but a
+// separate browser profile and queue each (queue-primary2.json, ...). They share
+// the ledger, so no two sessions apply to the same job, and core/company-cap.js
+// treats primary2..N as the same persona group as primary. Drive them with
+// scripts/parallel-session.sh, and log each extra profile in once:
+//   node setup-browser-login.js primary2
+// Keep persona keys free of trailing digits otherwise — they mark a session.
+const PARALLEL_SESSIONS = {
+  // primary: 3,      // → primary, primary2, primary3
+};
+for (const [base, count] of Object.entries(PARALLEL_SESSIONS)) {
+  for (let n = 2; n <= count; n++) {
+    const key = `${base}${n}`;
+    personas[key] = {
+      ...personas[base],
+      persona: key,
+      profileKey: key,
+      browserProfile: path.resolve(__dirname, '..', PROFILE_PREFIX + key),
+    };
+  }
+}
+
+// Resolve a persona key to its profile key / directory.
+function profileKeyFor(personaKey) {
+  const p = personas[personaKey];
+  return p ? p.profileKey : null;
+}
+function profileDirFor(personaKey) {
+  const p = personas[personaKey];
+  return p ? p.browserProfile : null;
+}
+// Persona keys sharing a profile directory, e.g. profileSiblings('primary') ->
+// ['primary', 'adjacent']. Used by the lock refusal message, so a refused run can
+// say which other persona holds the profile.
+function profileSiblings(profileKey) {
+  return Object.entries(personas).filter(([, p]) => p.profileKey === profileKey).map(([k]) => k);
+}
+
 // Route a job title + description to the best persona. Order = priority: list
 // your MOST SPECIFIC persona first so it wins ties. Returns null if no fit.
 function routePersona(titleAndJD) {
@@ -216,4 +296,13 @@ function routePersona(titleAndJD) {
   return null; // no fit
 }
 
-module.exports = { personas, routePersona, identityA, identityB };
+module.exports = {
+  personas,
+  routePersona,
+  identityA,
+  identityB,
+  profileKeyFor,
+  profileDirFor,
+  profileSiblings,
+  PROFILE_PREFIX,
+};

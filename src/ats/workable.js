@@ -12,10 +12,14 @@ const { pickFirstSuggestion } = require('../util/location');
 const { optionForLabel } = require('../util/answers-map');
 const { handleCaptcha } = require('../util/captcha');
 const { labelOf, fillTextByLabel, handleRadioGroups, handleNativeSelects, fillRemainingRequired, proofread, dryRunStop, confirmAfterSubmit, handleEmailVerification } = require('../util/form');
+const { attachResume } = require('../resume/upload');
+const { gateBeforeSubmit } = require('../util/answer-review');
 
 const STD = /^(firstname|lastname|email|phone|headline|summary|cover_letter|address|city|postcode|country)$/i;
 
+const trace = require("../util/trace");
 async function applyWorkable(page, jobMeta) {
+  trace.stage("workable");
   let url = page.url();
   if (!/\/apply\/?$/.test(url)) {
     const headText = await page.evaluate(() => document.body.innerText.slice(0, 2500)).catch(() => '');
@@ -37,14 +41,20 @@ async function applyWorkable(page, jobMeta) {
   await fill('input[name="phone"]', a.phoneFull);
   await fill('input[name="headline"]', a.currentTitle);
   await fill('input[name="city"]', a.city);
-  await fill('input[name="postcode"]', a.zip || '77002');
+  await fill('input[name="postcode"]', a.zip || '');
   await fill('input[name="country"]', a.country);
 
   // ── Resume upload — use the file input DIRECTLY. Do NOT click "Import resume
   // from": that triggers Workable's autofill (?autofill) flow which leaves the
-  // form in a state where the React submit silently no-ops.
-  const fileInput = await page.$('input[type="file"]');
-  if (fileInput) { await fileInput.setInputFiles(a.resumePath).catch(() => {}); await page.waitForTimeout(2500); }
+  // form in a state where the React submit silently no-ops. `buttonTexts: []`
+  // keeps attachResume's filechooser rung switched off for exactly that reason —
+  // its default labels ("Upload", "Attach") would match that button.
+  trace.stage("workable:resume");
+  const up = await attachResume(page, page, a.resumePath, {
+    buttonTexts: [],
+    settleMs: 2500,
+  });
+  if (!up.ok) return up.result;
 
   // ── Address (Google Places autocomplete) ──
   const addr = await page.$('input[name="address"]');
@@ -92,6 +102,21 @@ async function applyWorkable(page, jobMeta) {
   // ── Captcha ──
   await handleCaptcha(page, page).catch(() => {});
 
+
+  // ── Pre-submit review: ground every answer against the persona ──────────
+  //
+  // The last look before an irreversible action. Reads the filled form back out of the
+  // DOM and checks it against the persona: identity fields deterministically (always),
+  // then a model review of every answer when one is reachable. A finding it can ground is
+  // corrected in place; one it cannot blocks the submit and raises an attention item, so
+  // the job stays actionable rather than being sent wrong.
+  //
+  // Before the dry-run stop on purpose: a dry run should exercise the review too, which is
+  // how the quality is inspectable before anything goes live.
+  trace.stage("workable:review");
+  const reviewBlock = await gateBeforeSubmit(page, page, { persona: a, jobMeta });
+  if (reviewBlock) return reviewBlock;
+
   const dry = await dryRunStop(page, jobMeta && jobMeta.company, await unfilledNote(page));
   if (dry) return dry;
 
@@ -104,8 +129,10 @@ async function applyWorkable(page, jobMeta) {
     await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button')).find(x => /Submit application/i.test(x.innerText)); b?.click(); });
   });
 
-  // Email verification code (Workable sometimes requires it post-submit).
-  await handleEmailVerification(page.context(), page).catch(() => {});
+  // Email verification code (Workable sometimes requires it post-submit). Unavailable
+  // means the submission never completed, so skip and keep the job actionable.
+  const verify = await handleEmailVerification(page.context(), page, page, jobMeta).catch(() => ({ needed: false }));
+  if (verify.needed && !verify.ok) return { status: 'Skipped', reason: verify.reason, attention: verify.attention };
 
   if (page.url().includes('?success') ||
       await confirmAfterSubmit(page, page, { re: /thank you|application (received|submitted)|successfully submitted|we will be in touch|application has been submitted/i, urlRe: /\?success|\/success|\/thanks/i, rounds: 16, waitMs: 2500 })) {

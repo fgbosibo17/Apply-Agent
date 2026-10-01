@@ -34,8 +34,13 @@ test('friction records are sanitized of URLs and aggregated by signature', () =>
   assert.equal(list[0].signature, 'timeout at <url>');
 });
 
+// `preflight: false` (second arg, not stdin-reachable) skips the machine-readiness
+// checks in rounds.start. These two tests are about round/attention bookkeeping, and
+// the machine they run on is not the subject: CI has no Chrome and the real Resume/
+// PDFs are gitignored. Preflight itself is covered against injected machine fixtures
+// in tests/round-preflight.test.js and tests/doctor.test.js.
 test('a round tracks its own submissions and open attention items', () => {
-  const r = rounds.start({ persona: 'qa', target: 10 });
+  const r = rounds.start({ persona: 'secondary', target: 10 }, { preflight: false });
   ledger.add({ company: 'Acme', role: 'Senior SDET', url: 'https://boards.greenhouse.io/acme/jobs/1', roundId: r.id, confirmation: 'received' });
   queues.attentionAdd({ kind: 'login-required', url: 'https://y.example/2', roundId: r.id });
   const st = rounds.status(r.id);
@@ -46,6 +51,6 @@ test('a round tracks its own submissions and open attention items', () => {
 });
 
 test('round status with no argument returns the open round', () => {
-  const r = rounds.start({ persona: 'cloud', target: 3 });
+  const r = rounds.start({ persona: 'primary', target: 3 }, { preflight: false });
   assert.equal(rounds.status().id, r.id);
 });

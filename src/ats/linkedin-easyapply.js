@@ -11,6 +11,7 @@
 // Returns: { status: 'Applied'|'Skipped'|'Error', reason }
 
 const a = require('../answers');
+const { attachResume } = require('../resume/upload');
 
 const sleep = (p, ms) => p.waitForTimeout(ms);
 
@@ -71,10 +72,19 @@ async function getLabelFor(modal, el) {
 
 async function fillStep(modal, page) {
   // Resume upload if an empty file input is present.
+  //
+  // Throws rather than returning a status: fillStep is called in a loop and has no
+  // return contract, and the guardrails above are explicit that a broken step must
+  // never reach Submit. The caller's Error path is the correct destination for
+  // "the resume did not attach" — silently continuing is what this change removes.
   const fileInput = await modal.$('input[type="file"]');
   if (fileInput) {
     const hasResume = await modal.$('.jobs-document-upload-redesign-card__container, [class*="resume"]');
-    if (!hasResume) await fileInput.setInputFiles(a.resumePath).catch(() => {});
+    if (!hasResume) {
+      trace.stage("linkedin:resume");
+      const up = await attachResume(page, modal, a.resumePath, { buttonTexts: [] });
+      if (!up.ok) throw new Error(up.result.reason);
+    }
   }
 
   // Text inputs / textareas
@@ -120,7 +130,9 @@ async function hasUnfilledRequired(modal) {
   }).catch(() => false);
 }
 
+const trace = require("../util/trace");
 async function applyLinkedInEasyApply(ctx, page, job) {
+  trace.stage("linkedin");
   // Click the Easy Apply button to open the modal.
   const clicked = await page.evaluate(() => {
     const btn = document.querySelector('.jobs-apply-button') ||

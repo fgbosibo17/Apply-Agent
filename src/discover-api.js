@@ -48,6 +48,36 @@ function loadQueue() {
   try { return JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8')); } catch { return []; }
 }
 
+// Priority companies (data/priority-companies.json) are exempt from the BIG-CO and
+// aggregator filters - that is the whole point of naming them. They are NEVER exempt
+// from isPersonalExclude, so active interviews, the user's own companies and former
+// employers (data/personal-exclude.json) stay blocked even if listed here by mistake.
+const { isPersonalExclude, core: coreName } = require('./util/company-filter');
+function loadPriorityTokens(persona) {
+  try {
+    const pf = path.join(__dirname, '..', 'data', 'priority-companies.json');
+    if (!fs.existsSync(pf)) return { byAts: {}, all: new Set() };
+    const pj = JSON.parse(fs.readFileSync(pf, 'utf8'));
+    const byAts = {};
+    const all = new Set();
+    for (const scope of [pj[persona], pj._all]) {
+      if (!scope) continue;
+      for (const [ats, toks] of Object.entries(scope)) {
+        if (!Array.isArray(toks)) continue;
+        byAts[ats] = (byAts[ats] || []).concat(toks);
+        for (const t of toks) all.add(coreName(t));
+      }
+    }
+    return { byAts, all };
+  } catch (e) {
+    console.log(`    priority list unreadable: ${e.message}`);
+    return { byAts: {}, all: new Set() };
+  }
+}
+const PRIORITY = loadPriorityTokens(PERSONA);
+const allowedByPriority = (name) =>
+  !!name && PRIORITY.all.has(coreName(name)) && !isPersonalExclude(name);
+
 async function main() {
   if (!fs.existsSync(COMPANIES_FILE)) {
     console.error(`Missing ${COMPANIES_FILE}`);
@@ -61,6 +91,8 @@ async function main() {
 
   let atsList = ATS_LIST.filter((a) => companies[a] && companies[a].length);
   if (ATS_FILTER.length) atsList = atsList.filter((a) => ATS_FILTER.includes(a));
+  // Cap tokens per ATS to avoid sweeping all 9k+ tokens when queue only needs ~120
+  const TOKEN_CAP = parseInt(process.env.TOKEN_CAP || '0', 10);
 
   console.log(`\nAPI Discovery — persona: ${PERSONA} (${persona.fullName})`);
   console.log(`Match: ${persona.matchKeywords}`);
@@ -70,14 +102,14 @@ async function main() {
   const collected = [];
   const stats = {};
 
-  const CONC = 20; // concurrent board fetches — the pool is now thousands of tokens
+  const CONC = 80; // concurrent board fetches — increased for speed
 
   const collect = (ats, jobs) => {
     for (const j of jobs) {
       if (collected.length >= MAX) break;
       // Role fit + focused TITLE_FILTER + qa-hardware + federal/clearance rules.
       if (!titleEligible(j.title, persona)) continue;
-      if (blockCompany(j.company)) continue;                          // drop aggregators (+ big-cos unless ALLOW_BIG)
+      if (blockCompany(j.company) && !allowedByPriority(j.company)) continue;                          // drop aggregators (+ big-cos unless ALLOW_BIG)
       if (!locationEligible(j.location, j.remote, j.workplaceType, j.title)) continue; // remote-US or hybrid-TX only
       if (!recentEnough(j.posted)) continue;                          // recent postings only
       const url = (j.url || '').split('?')[0].split('#')[0];
@@ -86,13 +118,61 @@ async function main() {
       // Carry the ATS remote determination into the queue so clean-queue can
       // trust it (a role flagged remote but tagged with an HQ city like "(San
       // Francisco)" IS remote — the city is just the company location).
-      collected.push({ url, company: j.company, role: j.title, location: j.location, remote: !!j.remote, workplaceType: j.workplaceType || '', posted: j.posted || null, source: `api:${ats}`, persona: PERSONA, status: 'pending' });
+      // `discoveredAt` and `postedUnknown` exist because 71% of queued rows arrive with
+      // no posting date, which makes the recency filter a no-op for them. Stamping when
+      // WE saw the row gives the apply side something to age against, and flagging the
+      // gap keeps it countable instead of invisible.
+      collected.push({
+        url, company: j.company, role: j.title, location: j.location,
+        remote: !!j.remote, workplaceType: j.workplaceType || '',
+        posted: j.posted || null,
+        postedUnknown: !j.posted,
+        discoveredAt: new Date().toISOString(),
+        source: `api:${ats}`, persona: PERSONA, status: 'pending',
+      });
     }
   };
 
   for (const ats of atsList) {
     if (collected.length >= MAX) break;
-    const tokens = companies[ats].filter((t) => !DEFENSE_TOKENS.test(t) && !blockCompany(t));
+    let tokens = companies[ats].filter((t) =>
+      !DEFENSE_TOKENS.test(t) && (allowedByPriority(t) || !blockCompany(t)));
+    // PRIORITY + ROTATION.
+    //
+    // This line used to be a bare `tokens.slice(0, TOKEN_CAP)`. companies.json is
+    // sorted, so with the orchestrator's TOKEN_CAP=500 against 9,666 greenhouse
+    // tokens the sweep only ever reached names starting '0','1','a' - the same ~2%
+    // of the catalog every night, for every persona. Two changes:
+    //
+    //   1. PRIORITY tokens (data/priority-companies.json) go first and are never
+    //      truncated, so a named target is always swept however big the catalog is.
+    //   2. The remaining budget starts from a rotating offset persisted per
+    //      (persona, ats), so consecutive runs walk forward through the catalog and
+    //      wrap, instead of re-reading the same alphabetical head forever.
+    const priority = tokens.filter((t) => (PRIORITY.byAts[ats] || []).includes(t));
+
+    if (TOKEN_CAP > 0) {
+      const rest = tokens.filter((t) => !priority.includes(t));
+      const budget = Math.max(0, TOKEN_CAP - priority.length);
+      const offFile = path.join(__dirname, '..', '.state', 'discovery-offsets.json');
+      let offs = {};
+      try { if (fs.existsSync(offFile)) offs = JSON.parse(fs.readFileSync(offFile, 'utf8')); } catch {}
+      const key = `${PERSONA}:${ats}`;
+      const start = rest.length ? ((Number(offs[key]) || 0) % rest.length) : 0;
+      const window = budget >= rest.length
+        ? rest
+        : rest.slice(start, start + budget).concat(
+            start + budget > rest.length ? rest.slice(0, start + budget - rest.length) : []);
+      offs[key] = rest.length ? (start + budget) % rest.length : 0;
+      try {
+        fs.mkdirSync(path.dirname(offFile), { recursive: true });
+        fs.writeFileSync(offFile, JSON.stringify(offs, null, 2));
+      } catch (e) { console.log(`    could not persist discovery offset: ${e.message}`); }
+      tokens = priority.concat(window);
+      console.log(`    ${ats}: ${priority.length} priority + ${window.length} rotating (offset ${start}/${rest.length})`);
+    } else if (priority.length) {
+      tokens = priority.concat(tokens.filter((t) => !priority.includes(t)));
+    }
     let boardHits = 0, boardScanned = 0;
     const before = collected.length;
     for (let i = 0; i < tokens.length && collected.length < MAX; i += CONC) {

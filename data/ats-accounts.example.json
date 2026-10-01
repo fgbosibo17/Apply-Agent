@@ -1,0 +1,7 @@
+{
+  "_note": "Copy to data/ats-accounts.json (gitignored) and fill in. Workday, iCIMS and Jobvite make you create an account per employer; their handlers sign in or register with these. Use the persona's own email. Generate a unique password for this file - never reuse a real one - and keep the file out of git: it is plaintext.",
+  "personas": {
+    "primary":   { "email": "<you@example.com>",  "password": "<unique-password>", "name": "<First Last>", "phone": "<0000000000>" },
+    "secondary": { "email": "<you2@example.com>", "password": "<unique-password>", "name": "<First Last>", "phone": "<0000000000>" }
+  }
+}

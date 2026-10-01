@@ -1,3 +1,4 @@
+const engine = require('./answer-engine');
 // Claude-authored answer bank for ATS screening / essay questions.
 // generateAnswer(question, a) keyword-matches a question to a concise, persona-
 // tailored answer (a = the active persona's answers object). Falls back to a
@@ -211,6 +212,19 @@ function extractSkill(q) {
 function generateAnswer(question, a) {
   const q = (question || '').trim();
   if (!q) return null;
+
+  // Written for THIS persona and THIS posting by src/answer-engine.js, resolved in a
+  // pre-pass before filling started.
+  const generated = engine.answerFor(q);
+  if (generated) return generated;
+
+  // No generated answer. For an open-ended question that means the model was unreachable
+  // or judged the persona insufficient, so return null and leave the field empty rather
+  // than falling through to the keyword rules below. Those rules match on the QUESTION and
+  // have no idea which persona is applying — which is how a "9+ years with AWS and Azure"
+  // answer went out under the QA persona. A blank field is recoverable; a false claim on a
+  // job application is not.
+  if (engine.isOpenEnded(q)) return null;
   for (const s of SKILLS) if (s.re.test(q)) return s.answer(a);
   for (const cat of CATEGORIES) if (cat.re.test(q)) return cat.answer(a);
   const skill = extractSkill(q);

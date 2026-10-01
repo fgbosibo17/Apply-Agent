@@ -3,8 +3,8 @@
 // and appends de-duped candidates to a per-persona queue. No login needed, runs in
 // a throwaway profile so it never conflicts with the apply batch's cloud profile.
 //
-//   PERSONA=cloud node src/discover-ats.js
-//   PERSONA=cloud QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
+//   PERSONA=primary node src/discover-ats.js        # queries from the persona's targetRoles
+//   PERSONA=primary QUERIES="DevOps,Cloud Engineer,SRE" node src/discover-ats.js
 //
 // Queue file: queue-<persona>.json (candidates appended, deduped by URL).
 
@@ -24,10 +24,13 @@ const DISCOVERY_PROFILE = answers.browserProfile;
 const DEFAULT_QUERIES = {
   cloud: ['DevOps Engineer', 'Cloud Engineer', 'Site Reliability Engineer', 'Platform Engineer', 'Infrastructure Engineer', 'Cloud Support Engineer', 'SRE', 'Cloud Operations'],
   fullstack: ['Full Stack Engineer', 'Software Engineer React', 'Backend Engineer Node', 'Frontend Engineer', 'Full Stack Developer', 'Software Engineer remote'],
-  qa: ['SDET', 'QA Automation Engineer', 'Test Automation Engineer', 'Quality Engineer', 'Senior SDET', 'QA Architect'],
+  qa: ['SDET', 'QA Automation Engineer', 'Test Automation Engineer', 'Quality Engineer', 'Senior SDET', 'QA Architect', 'QA Engineer remote', 'Automation Engineer QA', 'Software Test Engineer'],
 };
 
-const QUERIES = (process.env.QUERIES ? process.env.QUERIES.split(',') : DEFAULT_QUERIES[PERSONA] || DEFAULT_QUERIES.cloud).map(s => s.trim());
+// No QUERIES and no preset for this persona → its own targetRoles, minus "remote".
+const ROLE_QUERIES = (answers.targetRoles || []).map((r) => r.replace(/\s+remote$/i, '')).filter((r) => r && !/^</.test(r));
+const QUERIES = (process.env.QUERIES ? process.env.QUERIES.split(',')
+  : DEFAULT_QUERIES[PERSONA] || (ROLE_QUERIES.length ? ROLE_QUERIES : DEFAULT_QUERIES.cloud)).map(s => s.trim());
 
 // ATS domains + URL match patterns + how to clean each.
 const ATS = [
@@ -35,6 +38,13 @@ const ATS = [
   { name: 'lever', q: 'site:jobs.lever.co', re: /jobs\.lever\.co\/[^/]+\/[a-f0-9-]{20,}/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/apply$/, '') },
   { name: 'ashby', q: 'site:jobs.ashbyhq.com', re: /jobs\.ashbyhq\.com\/[^/]+\/[a-f0-9-]{20,}/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/application$/, '') },
   { name: 'workable', q: 'site:apply.workable.com', re: /apply\.workable\.com\/[^/]+\/j\/[A-Z0-9]+/i, clean: u => u.split('?')[0].split('#')[0].replace(/\/apply\/?$/, '') },
+  { name: 'workday', q: 'site:myworkdayjobs.com', re: /myworkdayjobs\.com\/[^/]+\/jobs\/[^/\s]+/i, clean: u => u.split('?')[0].split('#')[0] },
+  { name: 'icims', q: 'site:jobs.icims.com', re: /icims\.com\/jobs\/\d+/i, clean: u => u.split('?')[0].split('#')[0] },
+  { name: 'taleo', q: 'site:taleo.net', re: /taleo\.net\/careersection\/[^\s]+/i, clean: u => u.split('?')[0].split('#')[0] },
+  { name: 'bamboohr', q: 'site:bamboohr.com', re: /bamboohr\.com\/careers\/\d+/i, clean: u => u.split('?')[0] },
+  { name: 'rippling', q: 'site:ats.rippling.com', re: /ats\.rippling\.com\/[^/]+\/jobs\/[a-f0-9-]+/i, clean: u => u.split('?')[0] },
+  { name: 'breezy', q: 'site:breezy.hr', re: /breezy\.hr\/p\/[a-f0-9]+/i, clean: u => u.split('?')[0] },
+  { name: 'jobvite', q: 'site:jobs.jobvite.com', re: /jobvite\.com\/[^/]+\/job\/[A-Za-z0-9]+/i, clean: u => u.split('?')[0] },
 ];
 
 const sleep = (p, ms) => p.waitForTimeout(ms);

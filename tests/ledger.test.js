@@ -8,7 +8,7 @@ const base = {
   company: 'Acme, Inc.',
   role: 'Senior SDET',
   url: 'https://boards.greenhouse.io/acme/jobs/123',
-  persona: 'qa',
+  persona: 'secondary',
   discoverySource: 'linkedin',
   confirmation: 'Application received',
 };
@@ -48,7 +48,12 @@ test('same company + same role at a different URL is an ask, not a silent apply'
   assert.equal(r.decision, 'ask');
 });
 
-test('company reapply is gated by the cooldown and released after it', () => {
+test('company reapply is gated by the cooldown and released after it', (t) => {
+  // The shipped default is 9999 days (never reapply to a company); exercise a finite one.
+  const config = require('../src/core/config');
+  process.env.APPLY_AGENT_COMPANY_REAPPLY_COOLDOWN_DAYS = '15';
+  config.reset();
+  t.after(() => { delete process.env.APPLY_AGENT_COMPANY_REAPPLY_COOLDOWN_DAYS; config.reset(); });
   ledger.add({ ...base, ts: new Date(Date.now() - 3 * 86400000).toISOString() });
   const soon = ledger.check({ company: 'Acme', role: 'Staff Platform Engineer', url: 'https://boards.greenhouse.io/acme/jobs/999' });
   assert.equal(soon.companyReapply, 'cooldown-active');

@@ -19,7 +19,13 @@
 // suffixes and trailing digits. We compare BOTH the full normalized string and
 // the suffix-peeled core against the denylist, so "stripe" and "stripeinc" match.
 function norm(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  // ATS feeds sometimes carry HTML entities in the company name ("Aisle &amp;
+  // Abroad"); decode the common ones first or "&amp;" survives as the letters
+  // "amp" and quietly changes the normalized string.
+  return (s || '')
+    .toLowerCase()
+    .replace(/&amp;|&#0*38;|&#x0*26;/g, '&')
+    .replace(/[^a-z0-9]+/g, '');
 }
 function core(s) {
   let t = norm(s);
@@ -133,20 +139,43 @@ const AGGREGATORS = new Set([
   'cybercoders', 'roberthalftechnology',
 ]);
 
-// PERSONAL exclusion — companies the user is actively interviewing with (or
-// otherwise never wants auto-applied). ALWAYS excluded, regardless of ALLOW_BIG.
-// Add tokens/names here as the user names them.
+// PERSONAL exclusion — companies the user is actively interviewing with, has
+// worked for, owns, or otherwise never wants auto-applied. ALWAYS excluded,
+// regardless of ALLOW_BIG. EMPTY in the template by design: list your own in
+// data/personal-exclude.json (gitignored — the list itself is personal, since a
+// set of former employers is most of a resume):
+//
+//   { "exclude": ["acme", "acme-corp", "previous-employer"] }
+//
+// Board tokens and display names both work; they are normalized like everything
+// else here. A blocklist miss is unrecoverable (the application is already sent),
+// so add every spelling you can think of.
 const PERSONAL_EXCLUDE = new Set([
-  'junipersquare', 'juniper-square',   // active interview (2026-06-30)
-  'akuity',                            // active interview (2026-06-30)
+  ...(() => {
+    try {
+      const j = require('../../data/personal-exclude.json');
+      return (Array.isArray(j) ? j : (j.exclude || [])).map((e) => norm(e)).filter(Boolean);
+    } catch { return []; }
+  })(),
 ]);
+
+// "&" vs "and": a board token like "acme_and_sons" normalizes to "acmesons",
+// a different string from "acme & sons", so it would slip past the denylist.
+// Derive the and-collapsed form of every entry so both spellings are blocked.
+const PERSONAL_EXCLUDE_NOAND = new Set(
+  [...PERSONAL_EXCLUDE]
+    .map((e) => norm(e).replace(/and/g, ''))
+    .filter((e) => e.length > 3)
+);
 
 function isPersonalExclude(nameOrToken) {
   const n = norm(nameOrToken);
   if (!n) return false;
   if (PERSONAL_EXCLUDE.has(n)) return true;
+  if (PERSONAL_EXCLUDE_NOAND.has(n)) return true;
   const c = core(nameOrToken);
-  return !!(c && PERSONAL_EXCLUDE.has(c));
+  if (c && PERSONAL_EXCLUDE.has(c)) return true;
+  return !!(c && PERSONAL_EXCLUDE_NOAND.has(c));
 }
 
 function isBigCompany(nameOrToken) {
@@ -169,7 +198,35 @@ function isAggregator(nameOrToken) {
 
 // Combined gate used by discovery + queue cleanup.
 function excludeCompany(nameOrToken) {
-  return isPersonalExclude(nameOrToken) || isBigCompany(nameOrToken) || isAggregator(nameOrToken);
+  return isNonSalaried(nameOrToken) || isPersonalExclude(nameOrToken) || isBigCompany(nameOrToken) || isAggregator(nameOrToken);
 }
 
-module.exports = { isBigCompany, isAggregator, isPersonalExclude, excludeCompany, norm, core };
+module.exports = { isBigCompany, isAggregator, isPersonalExclude, isNonSalaried, excludeCompany, norm, core };
+
+// SALARIED EMPLOYMENT ONLY
+// A DIFFERENT reason from PERSONAL_EXCLUDE above, so it gets its own list: that
+// one is companies the user does not want to hear from, this one is postings that
+// are not a job in the salaried-employment sense. Keeping the two apart matters —
+// merged, nobody can tell a personal choice from a rule about what counts as a job.
+//
+// What lands here: boards whose entire inventory is commission-only, 1099, or
+// recruitment dressed as employment. usasurveyjob (TowardJobs / USPolls) listed
+// 1673 postings, destinationknot (Destination Careers) 457, skillerszone 72,
+// aisle_and_abroad 50 - between them more lane matches than every real employer
+// found so far, which is exactly how a volume target gets hit with nothing to
+// show for it.
+const NON_SALARIED = new Set([
+  `usasurveyjob`, `towardjobs`, `uspollsjobboard`,
+  `destinationknot`, `destinationcareers`,
+  `skillerszone`,
+  `globalelitecareers`, `globalelite`,   // 7 identical Work From Home Client Services Associate posts across unrelated cities from one board - same commission-only signature. Applying the salaried-only rule; trivially reversible if wrong.
+  `aisleandabroad`, `aisleabroad`, `aogarciaagency`, `aogarcia`,
+]);
+
+function isNonSalaried(nameOrToken) {
+  const n = norm(nameOrToken);
+  if (!n) return false;
+  if (NON_SALARIED.has(n)) return true;
+  const c = core(nameOrToken);
+  return !!(c && NON_SALARIED.has(c));
+}

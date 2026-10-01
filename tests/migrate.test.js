@@ -11,9 +11,9 @@ const { parseCsv } = require('../src/core/csv');
 beforeEach(() => resetState());
 
 const CSV = `Date,Company,Role,URL,ATS Platform,Discovery Source,Status,Match Score,Notes,Persona
-2026-06-26,checkr,"Quality Assurance Specialist, Truework",https://boards.greenhouse.io/checkr/jobs/7921301,greenhouse,api:greenhouse,Applied,8/10,,qa
-2026-06-26,checkr,"Quality Assurance Specialist, Truework",https://boards.greenhouse.io/checkr/jobs/7921301,greenhouse,api:greenhouse,Applied,8/10,,qa
-2026-06-27,Beta,QA Lead,https://jobs.lever.co/beta/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,lever,LinkedIn,Skipped,4/10,manual QA,qa
+2026-06-26,checkr,"Quality Assurance Specialist, Truework",https://boards.greenhouse.io/checkr/jobs/7921301,greenhouse,api:greenhouse,Applied,8/10,,secondary
+2026-06-26,checkr,"Quality Assurance Specialist, Truework",https://boards.greenhouse.io/checkr/jobs/7921301,greenhouse,api:greenhouse,Applied,8/10,,secondary
+2026-06-27,Beta,QA Lead,https://jobs.lever.co/beta/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,lever,LinkedIn,Skipped,4/10,manual QA,secondary
 `;
 
 test('parseCsv keeps quoted commas inside one field', () => {

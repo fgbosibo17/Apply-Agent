@@ -262,6 +262,222 @@ You can leave it running while you do other things. Every job is logged in `appl
 
 ---
 
+## 🖥️ Running on a second machine
+
+The agent is built to run on two machines sharing one logical ledger: a laptop where you
+edit personas and review results, and an always-on box (a Linux server) that runs the
+scheduled batches overnight. One machine works too — the same server can be the only one.
+Here is what setting up the second one involves.
+
+### 1. Bootstrap
+
+On the new machine, after cloning the repo:
+
+```bash
+bash scripts/bootstrap.sh
+```
+
+It installs dependencies and then hands over to `apply-agent doctor`, which checks Node,
+the lock file, Playwright, **real Chrome** (not bundled Chromium), `xvfb-run` on Linux,
+the secret backend, free disk, the ledger, and each persona's resume and browser profile.
+Every failure prints what to do about it. Re-check any time with `npm run doctor`.
+
+### 2. One browser login per machine, over VNC
+
+On a headless server there is no screen to log in on, so do it once through VNC:
+
+```bash
+x11vnc -display :0 -localhost -nopw &        # on the server
+ssh -L 5900:localhost:5900 you@server        # from the laptop, then connect a VNC client
+xvfb-run -a google-chrome --user-data-dir=/path/to/repo/browser-profile-secondary
+```
+
+Sign in to LinkedIn and Google in that window, then close it. Repeat for each profile you
+intend to run there (`browser-profile-secondary`, `browser-profile-primary`).
+
+An **empty or missing** `browser-profile-*` directory is the most common new-machine
+failure, and doctor calls it out explicitly: *"Nobody has logged in as `<persona>` on this
+machine yet."*
+
+### 3. Why browser profiles are NEVER copied between machines
+
+It is tempting to `scp` a working profile across. Don't.
+
+A Chrome profile carries the OS and device fingerprint of the machine that created it. A
+profile minted on macOS and replayed on Ubuntu is exactly the mismatch that anti-bot
+scoring looks for — Greenhouse's invisible reCAPTCHA Enterprise and Lever's passive
+hCaptcha both score the session — so a copied profile does not save you a login, it costs
+you applications that look submitted and quietly never arrive.
+
+Each machine logs in once and keeps its own. Anything that genuinely needs to be on both
+machines travels by **git** (tracked run output) or **S3** (the state directory). Neither
+carries profiles, and `state push`/`state pull` refuse a payload that names one.
+
+Note that **one profile serves one account, not one persona**: `primary` and `adjacent` are
+the same identity — same name, email, phone and LinkedIn — so they share
+`browser-profile-primary`. `secondary` is a separate identity with its own.
+
+### 4. The single-writer rule
+
+Two machines sharing one ledger must never run the same browser profile at once: two
+uncoordinated runs fork history and silently defeat the duplicate check. Two guards
+enforce it, and a refusal always says which one:
+
+- **Profile lock** (`.state/locks/<profileKey>.lock`) — cross-machine. `primary` and
+  `adjacent` exclude each other everywhere because they share a profile; `secondary` is free to
+  run alongside either.
+- **Host semaphore** — one browser run per machine, whatever the persona. Two Chrome
+  sessions on one modest box degrade each other.
+
+```bash
+npm run agent -- round locks                            # who holds what, and how stale
+npm run agent -- round stop --round <id>                # graceful: finishes the job in flight
+npm run agent -- round unlock --force --persona secondary  # only when that run is definitely dead
+```
+
+A lock whose heartbeat is older than 30 minutes is treated as dead and reclaimed, so a
+killed run does not block the next night forever.
+
+### 5. Resume tailoring: what gets stored and for how long
+
+Tailoring is **opt-in** — `npm run go -- secondary --tailor`. Without it, base resumes upload
+exactly as before and no model is called. With it, a batch pass runs before the browser
+opens (never per job, so a model outage cannot strand a browser mid-application) and
+stores:
+
+```
+.state/resumes/
+  base/<persona>.txt              extracted base resume text
+  tailored/<round-id>/
+    <job-id>.md                   the source — KEPT FOREVER (a few KB)
+    <job-id>.pdf                  the upload — GC'd after 30 days
+  manifest.ndjson                 job, persona, round, hashes, verdict, timestamp
+```
+
+The split is the point: hundreds of applications each with a PDF becomes gigabytes, but
+when a recruiter calls three months later you need to know what they saw. The markdown
+source is tiny and regenerates the PDF on demand.
+
+```bash
+npm run agent -- resume status              # what tailoring has produced
+npm run agent -- gc                         # delete PDFs past retention (sources kept)
+npm run agent -- resume render <job-id>     # regenerate a PDF from its stored source
+```
+
+Each ledger row records which file was actually uploaded — the tailored document's hash,
+or `base`.
+
+### 6. The S3 variables
+
+State sync is optional; without it each machine keeps its own state.
+
+```bash
+APPLY_AGENT_STATE_S3=s3://your-bucket/apply-agent   # the prefix; state lands under /state/
+APPLY_AGENT_STATE_S3_PROFILE=runner                 # aws CLI profile (or AWS_PROFILE)
+```
+
+`npm run doctor` verifies the `aws` CLI is present and that the profile can both **read
+and write** the prefix — read-only credentials are a silent trap, because pulls succeed
+while every push fails and the two machines drift apart.
+
+Three things are never synced: `machine.json` (a shared machine id would make each host
+treat the other's lock as its own), `locks/` and `stop/` (both describe a process on one
+host).
+
+Optionally, the runner can borrow a model and a mailbox from an orchestrator host over
+the private network instead of holding those credentials itself:
+
+```bash
+APPLY_AGENT_TAILOR_ENDPOINT=https://orchestrator/tailor
+APPLY_AGENT_EMAIL_CODE_ENDPOINT=https://orchestrator/email-code
+APPLY_AGENT_SERVICE_TOKEN=<bearer token for both>
+```
+
+Both are checked by doctor, both fail soft: no model means base resumes, no mailbox means
+an attention item for that job. The orchestrator being down reduces a run's quality; it
+never aborts one.
+
+### 7. The scheduled run
+
+```bash
+scripts/nightly-run.sh secondary --live --max 25
+```
+
+One persona per invocation — which persona runs on which night belongs to whatever
+schedules it, not to this repo. **It defaults to a dry run**: live submission needs
+`--live`, every time. Everything it does goes to `.state/runs/logs/`; stdout is a single
+digest JSON document, on every path including failure.
+
+### 8. Running all night
+
+On the server, four pieces cover an unattended night. All of them are Linux scripts
+(GNU `date`, `flock`, `timeout`) and every browser step runs under
+`scripts/with-display.sh`, i.e. real headful Chrome on a virtual `xvfb` display —
+never `headless: true`, which CAPTCHA scoring quietly rejects.
+
+**The nightly orchestrator** round-robins every persona toward a target, one short
+round each per cycle, so no persona starves the others. It runs browser hygiene and
+discovery once per persona, stops before the next night's start, holds a lock so two
+nights never overlap, and writes a summary JSON for the alert below.
+
+```bash
+scripts/nightly-orchestrator.sh --live                     # every persona, TARGET=50 each
+PERSONAS="primary secondary" TARGET=40 scripts/nightly-orchestrator.sh --live
+PRIORITY_PERSONA=secondary TARGET_SECONDARY=75 scripts/nightly-orchestrator.sh --live
+```
+
+Knobs (env): `TARGET`, `TARGET_<PERSONA>`, `PERSONAS`, `PRIORITY_PERSONA`, `MAX_ROUNDS`
+(cycles, default 8), `MAX_EVAL_CAP` (listings per round, default 150), `RUN_HOURS`
+(default 22) and `NEXT_START_UTC` (your cron start, default `01:00`).
+
+**A one-off push** gets one persona to a number now, outside the night:
+
+```bash
+scripts/persona-push.sh primary 75      # stops after two rounds in a row with no gain
+```
+
+**Parallel sessions** run one persona as several concurrent browsers — same identity,
+separate profile and queue each, one shared ledger so no job is applied to twice. Set
+`PARALLEL_SESSIONS = { primary: 3 }` in `src/personas.js`, log each extra profile in
+once over VNC (`browser-profile-primary2`, `-primary3`), then let the watchdog keep
+them alive. Session 1 alone discovers, then `scripts/redistribute-queues.py` deals the
+results out across every session's queue.
+
+```bash
+scripts/watchdog-sessions.sh primary 3  # starts any of sessions 1-3 that is not running
+```
+
+Mind the host: each session is a full Chrome. Size the count to the box's RAM.
+
+**Alerts (optional).** `scripts/notify-telegram.py` sends the end-of-run summary —
+applied vs. target per persona, errors, rounds, duration — and
+`scripts/gmail-session-check.py` (run by the orchestrator before it starts) alerts when
+a profile has lost its Google session, because a signed-out profile cannot read the
+email security codes Greenhouse sends. Configure once:
+
+```bash
+# ~/.telegram_notify_credentials  (chmod 600, outside the repo) — or export the same two vars
+TELEGRAM_BOT_TOKEN=123456:abc...
+TELEGRAM_CHAT_ID=123456789
+```
+
+`NOTIFY_TZ=America/New_York` shows times in your zone. Without credentials both
+scripts print instead of sending.
+
+**A crontab that ties it together** (`crontab -e` on the server; times are UTC):
+
+```cron
+# nightly run at 01:00 UTC, all personas, real submissions
+0 1 * * *    cd /home/you/Apply-Agent && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
+# or: keep 3 parallel sessions of one persona alive all day
+*/5 * * * *  cd /home/you/Apply-Agent && bash scripts/watchdog-sessions.sh primary 3
+```
+
+Check progress from anywhere with `npm run agent -- digest --round <id>`, and stop a
+run gracefully with `npm run agent -- round stop --round <id>`.
+
+---
+
 ## ❓ Common questions
 
 **Will it apply to jobs I don't want?**

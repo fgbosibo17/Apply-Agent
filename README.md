@@ -1,6 +1,6 @@
 # Autonomous Job-Application Agent
 
-An AI-driven agent that **finds remote/hybrid jobs and applies to them for you** — end to end, on the company's real ATS (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, CareerPuck). It discovers fresh openings, scores fit, fills every form field intelligently from your profile, writes tailored screening answers, **proof-reads before submitting**, and logs everything so it never applies to the same job twice.
+An AI-driven agent that **finds remote/hybrid jobs and applies to them for you** — end to end, on the company's real ATS (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, CareerPuck, Workday, iCIMS, Jobvite, BambooHR, Breezy, Rippling). It can run from your laptop or all night on a Linux server. It discovers fresh openings, scores fit, fills every form field intelligently from your profile, writes tailored screening answers, **proof-reads before submitting**, and logs everything so it never applies to the same job twice.
 
 It's built to be driven by **[Claude Code](https://claude.com/claude-code)** (talk to it: "setup", then "go"), but the core is plain Node + Playwright and runs on its own too.
 
@@ -210,15 +210,24 @@ src/
   import-companies.js bulk-imports public ATS company-token datasets
   personas.js   ←── YOUR identity + answers (edit this)
   answer-bank.js ←── screening-question answer engine (customize for your field)
-  ats/                Greenhouse / Lever / Ashby / Workable / SmartRecruiters / CareerPuck handlers
-  util/               form-fill, location, captcha, answer-mapping, email-OTP, learned-answers
+  ats/                Greenhouse / Lever / Ashby / Workable / SmartRecruiters / CareerPuck /
+                      Workday / iCIMS / Jobvite / BambooHR / Breezy / Rippling handlers
+  util/               form-fill, location, captcha, answer-mapping, EEO, email-OTP, learned-answers
+  core/               ledger, rounds, locks, preflight/doctor, digest, state sync
+  resume/             resume verify, upload, opt-in tailoring and rendering
+scripts/
+  go.sh               `npm run go -- <persona>` — the interactive run envelope
+  nightly-run.sh      the same envelope for schedules (dry run unless --live)
+  nightly-orchestrator.sh  every persona, all night, from cron (see ONBOARDING.md)
+  parallel-session.sh one persona as N browsers; watchdog-sessions.sh keeps them up
+  bootstrap.sh        set up a new machine, then `npm run doctor`
 data/companies.json   public ATS company tokens (the discovery seed) — shareable, no personal data
 CLAUDE.md             instructions + setup wizard for Claude Code
 applications-log.csv  every submission (dedup source of truth) — starts empty
 seen-jobs.csv         every job evaluated (dedup) — starts empty
 ```
 
-**Never committed** (gitignored): your `Resume/*`, `browser-profile-*/` (login cookies — keep these private!), generated cover letters, and your real `applications-log.csv` / `seen-jobs.csv` once you start running.
+**Never committed** (gitignored): your `Resume/*`, `browser-profile-*/` (login cookies — keep these private!), `.state/` (the ledger), `data/ats-accounts.json` (ATS passwords), `data/personal-exclude.json` (your company blocklist), generated cover letters, and your real `applications-log.csv` / `seen-jobs.csv` once you start running.
 
 > **Two run paths, one set of facts.** Driving it **with Claude Code** ("setup" → "go") fills forms from the `📝 APPLICATION ANSWERS` block in `CLAUDE.md`. Running the **node loop** headlessly reads `src/personas.js`. The `setup` wizard fills **both**; if you edit by hand, keep the two in sync (they hold the same identity + answers).
 

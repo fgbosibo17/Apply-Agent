@@ -7,10 +7,14 @@ const { generateAnswer } = require('../answer-bank');
 const { fillLocation } = require('../util/location');
 const { handleCaptcha } = require('../util/captcha');
 const { labelOf, fillTextByLabel, handleRadioGroups, handleNativeSelects, fillRemainingRequired, proofread, dryRunStop, confirmAfterSubmit, handleEmailVerification } = require('../util/form');
+const { attachResume } = require('../resume/upload');
+const { gateBeforeSubmit } = require('../util/answer-review');
 
 const STD = /^(name|email|phone|org|urls|resume|location|comments)/;
 
+const trace = require("../util/trace");
 async function applyLever(page, jobMeta) {
+  trace.stage("lever");
   const url = page.url();
   if (!/\/apply(\/|$)/.test(url)) {
     await page.goto(url.replace(/\/$/, '') + '/apply', { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -30,8 +34,16 @@ async function applyLever(page, jobMeta) {
   await dismissCookies(page);
 
   // ── Resume ──
-  const fileInput = await page.$('input[name="resume"][type="file"], input[type="file"]');
-  if (fileInput) { await fileInput.setInputFiles(a.resumePath).catch(() => {}); await page.waitForTimeout(1800); }
+  // Lever's passive hCaptcha scores the session, so a silently missing attachment
+  // here produced a form that looked submitted and arrived empty. attachResume
+  // confirms the input actually holds the file before the run continues.
+  trace.stage("lever:resume");
+  const up = await attachResume(page, page, a.resumePath, {
+    selectors: ['input[name="resume"][type="file"]', 'input[type="file"]'],
+    buttonTexts: [],
+    settleMs: 1800,
+  });
+  if (!up.ok) return up.result;
 
   // ── Standard fields ──
   const fill = async (sel, val) => { const e = await page.$(sel); if (e && val && !(await e.inputValue().catch(() => ''))) await e.fill(val).catch(() => {}); };
@@ -86,6 +98,21 @@ async function applyLever(page, jobMeta) {
   // ── Captcha (passive hCaptcha enclave → auto-pass; HITL if a challenge shows) ──
   await handleCaptcha(page, page).catch(() => {});
 
+
+  // ── Pre-submit review: ground every answer against the persona ──────────
+  //
+  // The last look before an irreversible action. Reads the filled form back out of the
+  // DOM and checks it against the persona: identity fields deterministically (always),
+  // then a model review of every answer when one is reachable. A finding it can ground is
+  // corrected in place; one it cannot blocks the submit and raises an attention item, so
+  // the job stays actionable rather than being sent wrong.
+  //
+  // Before the dry-run stop on purpose: a dry run should exercise the review too, which is
+  // how the quality is inspectable before anything goes live.
+  trace.stage("lever:review");
+  const reviewBlock = await gateBeforeSubmit(page, page, { persona: a, jobMeta });
+  if (reviewBlock) return reviewBlock;
+
   const dry = await dryRunStop(page, jobMeta && jobMeta.company, await unfilledNote(page));
   if (dry) return dry;
 
@@ -100,8 +127,13 @@ async function applyLever(page, jobMeta) {
     await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button')).find(x => /submit application/i.test(x.innerText)); b?.click(); });
   });
 
-  await handleEmailVerification(page.context(), page).catch(() => {});
+  // A code we cannot get means the form is still sitting on the code field, unsubmitted.
+  // Skip with an attention item rather than reporting a confirmation failure for a job
+  // that is only waiting on a code.
+  const verify = await handleEmailVerification(page.context(), page, page, jobMeta).catch(() => ({ needed: false }));
+  if (verify.needed && !verify.ok) return { status: 'Skipped', reason: verify.reason, attention: verify.attention };
 
+  trace.stage("lever:confirm");
   if (await confirmAfterSubmit(page, page, { urlRe: /\/thanks|\/confirmation|\/success/i, re: /thank you|application submitted|successfully submitted|received your application/i })) {
     return { status: 'Applied', reason: '—' };
   }
@@ -109,7 +141,12 @@ async function applyLever(page, jobMeta) {
   const cap = await page.$('iframe[src*="hcaptcha.com/captcha"]').catch(() => null);
   if (cap && await cap.isVisible().catch(() => false)) return { status: 'Error', reason: 'Blocked by hCaptcha challenge (needs manual solve)' };
   const err = await page.$$eval('.application-question.error, [aria-invalid="true"], .form-field-error', els => els.map(e => e.innerText).filter(Boolean).join(' | ').slice(0, 160)).catch(() => '');
-  return { status: 'Error', reason: err ? 'Validation: ' + err : 'No confirmation after submit' };
+  if (err) return { status: 'Error', reason: 'Validation: ' + err };
+  // Fallback: if submit button is gone and no errors, the app went through
+  const btnGone = await page.$('button:has-text("Submit application"), button[type="submit"]').catch(() => null);
+  const btnVisible = btnGone ? await btnGone.isVisible().catch(() => false) : false;
+  if (!btnVisible) return { status: 'Applied', reason: 'submit button gone (no explicit confirmation page)' };
+  return { status: 'Error', reason: 'No confirmation after submit' };
 }
 
 async function dismissCookies(page) {

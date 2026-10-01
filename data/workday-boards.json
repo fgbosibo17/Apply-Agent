@@ -1,0 +1,6 @@
+{
+  "_comment": "Workday tenants for src/discover-workday.js. EMPTY BY DESIGN - add employers you want swept. Find the values in a posting URL: https://<tenant>.wd<wd>.myworkdayjobs.com/<site>/job/... Probe before adding: Workday answers every hostname, so a wrong guess fails silently and queues nothing. Listed employers bypass the big-company and aggregator filters (naming them is the point); the personal blocklist and the salaried-only rule still apply.",
+  "boards": [
+    { "tenant": "<tenant>", "wd": 5, "site": "<SiteName>", "company": "<Company Name>", "disabled": true }
+  ]
+}

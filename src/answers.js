@@ -1,13 +1,13 @@
 // Application answers — persona-aware.
-// Select the active persona with the PERSONA env var: qa | cloud | fullstack
+// Select the active persona with the PERSONA env var: primary | adjacent | secondary
 // There is NO default — the persona must be chosen explicitly for every run,
 // because each one carries a different identity (name/email/phone/LinkedIn),
 // resume, and browser profile. Defaulting silently risks applying to a job
 // with the wrong identity.
 //
-//   PERSONA=qa        node src/index.js
-//   PERSONA=cloud     node src/index.js
-//   PERSONA=fullstack node src/index.js
+//   PERSONA=primary   node src/index.js
+//   PERSONA=adjacent  node src/index.js
+//   PERSONA=secondary node src/index.js
 //
 // Persona definitions live in ./personas.js.
 
@@ -17,7 +17,7 @@ const active = (process.env.PERSONA || '').toLowerCase();
 if (!active) {
   throw new Error(
     'PERSONA env var is required — no default. Choose explicitly:\n' +
-    '  PERSONA=qa | cloud | fullstack\n' +
+    '  PERSONA=primary | adjacent | secondary\n' +
     'Each persona is a different identity (email, phone, LinkedIn, resume, browser profile).'
   );
 }

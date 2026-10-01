@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const paths = require('./paths');
 const { append, readAll } = require('./ndjson');
 const config = require('./config');
+const machine = require('./machine');
 const { canonicalizeUrl, employerJobId, provider, companyKey, roleKey } = require('./canonical');
 
 const SCHEMA = 1;
@@ -44,6 +45,14 @@ function normalize(entry) {
     discoverySource: entry.discoverySource || 'unknown',
     discoverySourceId: entry.discoverySourceId || '',
     roundId: entry.roundId || '',
+    // Which machine wrote this row. Two machines share one logical ledger, so when
+    // they disagree about history the first question is who recorded what.
+    machineId: entry.machineId || machine.id(),
+    // WHICH resume file this application actually uploaded: the tailored document's
+    // hash, or the string 'base'. Recorded per entry because "did they get the tailored
+    // one?" is otherwise unanswerable after the rendered PDF is GC'd — the hash maps
+    // back to the permanent .md source in the manifest.
+    resumeVariant: entry.resumeVariant || 'base',
     status: entry.status || 'submitted',
     score: entry.score === undefined ? null : entry.score,
     gate: entry.gate || '',

@@ -119,7 +119,7 @@ async function main() {
         if (!r.externalUrl || !SUPPORTED.test(r.externalUrl)) continue;     // handler-supported ATS only
         const ext = r.externalUrl.split('?')[0].split('#')[0];
         if (seen.has(ext) || known.has(ext)) continue;                       // dedupe
-        if (excludeCompany(r.company)) continue;                             // big-co / juniper / akuity
+        if (excludeCompany(r.company)) continue;                             // big-co / aggregator / personal blocklist
         if (FOREIGN.test(r.loc) && !/remote/i.test(r.loc)) continue;
         known.add(ext);
         collected.push({ url: ext, company: r.company || 'unknown', role: r.title, location: r.loc || 'Remote', remote: /remote/i.test(r.loc), source: 'builtin', persona: PERSONA, status: 'pending' });

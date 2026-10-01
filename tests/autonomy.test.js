@@ -82,10 +82,10 @@ test('canAutoSubmit requires routine-auto, a review gate and autoEligible', () =
 });
 
 test('a scoped grant does not leak to another persona or past its cap', () => {
-  autonomy.grant({ mode: 'routine-auto', persona: 'qa', maxSubmissions: 5 });
-  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'qa' }).allowed, true);
-  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'cloud' }).allowed, false);
-  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'qa', submittedThisRound: 5 }).allowed, false);
+  autonomy.grant({ mode: 'routine-auto', persona: 'secondary', maxSubmissions: 5 });
+  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'secondary' }).allowed, true);
+  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'primary' }).allowed, false);
+  assert.equal(autonomy.canAutoSubmit({ gate: 'review', autoEligible: true, persona: 'secondary', submittedThisRound: 5 }).allowed, false);
 });
 
 test('revoke drops the grant', () => {

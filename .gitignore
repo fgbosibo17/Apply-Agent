@@ -37,6 +37,15 @@ Resume/*.docx
 # Per-user runtime state that may contain sensitive info
 ats-accounts.txt
 scheduled-runs.log
+# Workday / iCIMS / Jobvite sign-in credentials — PLAINTEXT passwords. Copy
+# data/ats-accounts.example.json to this name; never commit it.
+data/ats-accounts.json
+# Your personal company blocklist (active interviews, former employers, your own
+# companies). A list of former employers is most of a resume, so it stays local.
+data/personal-exclude.json
+# Per-persona discovery queues (queue-<persona>.json, incl. parallel sessions)
+# fill with real postings at run time; only the empty queue.json ships.
+queue-*.json
 
 # Local env overrides (optional helper config). No secrets are required — the
 # refine helper uses the claude CLI, not an API key — but ignore .env anyway.

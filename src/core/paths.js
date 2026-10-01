@@ -53,6 +53,47 @@ const paths = {
   // 0700 state dir, not next to the source.
   runLogs: () => stateSubdir('runs', 'logs'),
   dryRuns: () => stateSubdir('runs', 'dryrun'),
+  // Machine identity + the two run guards. Locks live under the state dir so they
+  // travel with the shared state: the profile lock has to be visible to BOTH
+  // machines to mean anything, which is the whole point of it.
+  machine: () => statePath('machine.json'),
+  // State schema version stamp. Guards against older code reading state written by a
+  // newer commit on the other machine and silently dropping fields it does not know.
+  schema: () => statePath('schema.json'),
+  locksDir: () => stateSubdir('locks'),
+  lock: (name) => path.join(stateSubdir('locks'), name),
+  // Cooperative stop signal. A separate file per round rather than a field in
+  // rounds.json: the stopping process and the running one would otherwise
+  // read-modify-write the same JSON concurrently, and the whole point is to signal a
+  // live run without touching what it is writing.
+  stopFlag: (roundId) => path.join(stateSubdir('stop'), `${roundId}.stop`),
+  stopDir: () => stateSubdir('stop'),
+  // ── Tailored resumes ──────────────────────────────────────────────────────
+  //
+  // RETENTION IS DELIBERATELY SPLIT, and the split is the whole design:
+  //
+  //   tailored/<round>/<job-id>.md   the SOURCE. A few KB. KEPT FOREVER.
+  //   tailored/<round>/<job-id>.pdf  the RENDER. Hundreds of KB. GC'd after 30 days.
+  //
+  // Hundreds of applications each carrying a PDF becomes gigabytes on a machine that
+  // shares its disk with other services. But when a recruiter calls three months
+  // later, the one question that matters is "what did they actually see?" — and an
+  // agent that cannot answer that is worse than useless, it is embarrassing.
+  //
+  // The markdown source answers it, costs almost nothing, and regenerates the PDF on
+  // demand (`apply-agent resume render <job-id>`). So the source is permanent and the
+  // rendered PDF is disposable. Deleting a PDF loses nothing recoverable; deleting a
+  // source loses the record of what an employer received.
+  resumesDir: () => stateSubdir('resumes'),
+  // Extracted base resume text per persona, cached so the extraction ladder
+  // (docx / pdftotext / textutil) runs once rather than per job.
+  resumeBaseDir: () => stateSubdir('resumes', 'base'),
+  resumeBaseText: (persona) => path.join(stateSubdir('resumes', 'base'), `${persona}.txt`),
+  resumeTailoredDir: () => stateSubdir('resumes', 'tailored'),
+  resumeRoundDir: (roundId) => stateSubdir('resumes', 'tailored', String(roundId)),
+  resumeSource: (roundId, jobId) => path.join(stateSubdir('resumes', 'tailored', String(roundId)), `${jobId}.md`),
+  resumeRender: (roundId, jobId) => path.join(stateSubdir('resumes', 'tailored', String(roundId)), `${jobId}.pdf`),
+  resumeManifest: () => statePath('resumes', 'manifest.ndjson'),
   applications: () => statePath('applications.ndjson'),
   outcomes: () => statePath('outcomes.ndjson'),
   attention: () => statePath('attention.ndjson'),

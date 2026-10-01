@@ -100,4 +100,145 @@ async function getConfirmLink(context, { query = 'confirm OR verify OR applicati
   } finally { await tab.close().catch(() => {}); }
 }
 
-module.exports = { getEmailCode, getConfirmLink, extractCode };
+// ── The fallback, and why it is only a fallback ─────────────────────────────
+//
+// Everything above is the PRIMARY path and stays that way. It opens a second tab in
+// the SAME persistent context, where the persona profile is already signed into Gmail,
+// and reads the code out of the web UI. No password, no IMAP, no stored credential.
+// It is also better for anti-bot reasons than an out-of-band relay: the code is read
+// in the same warm session that is filling the form, from the same IP and the same
+// browser fingerprint.
+//
+// Its weakness is that it scrapes Gmail's DOM — `tr.zA` for a message row, `h2.hP` for
+// the subject, `.a3s` for the body. Google changes those without notice, and when they
+// change the functions above return null. Silently. That failure mode is what turns
+// into abandoned applications nobody hears about.
+//
+// So: the orchestrator endpoint is called ONLY after the primary has returned null,
+// never before, and EVERY fallback is recorded as friction. The friction record is the
+// point — it makes DOM breakage a visible, countable event instead of a slow decay.
+// Two fallbacks in a night is a bad night; forty means the selectors have moved.
+const orchestrator = require('./orchestrator');
+
+function recordFallback(what, detail) {
+  try {
+    require('../core/queues').frictionRecord({
+      area: 'email-code:gmail-dom',
+      reproducible: true,
+      summary: `Gmail scrape returned null for ${what}; used the orchestrator fallback. `
+        + 'Selectors tr.zA / h2.hP / .a3s may have changed.',
+      signature: `gmail-dom-null:${what}${detail ? ':' + detail : ''}`,
+    });
+  } catch { /* friction is a diagnostic; never let it break a run */ }
+}
+
+// getEmailCode, then the endpoint. Returns { code, via, fallbackError }.
+// `via` is 'browser' | 'endpoint' | null — the caller reports which path produced the
+// code, so a run's dependence on the fallback is visible in its output.
+async function getEmailCodeOrFallback(context, opts = {}) {
+  const primary = await getEmailCode(context, opts).catch(() => null);
+  if (primary) return { code: primary, via: 'browser' };
+
+  // Only now.
+  recordFallback('code');
+  if (!orchestrator.emailCodeEndpoint()) {
+    return { code: null, via: null, fallbackError: 'APPLY_AGENT_EMAIL_CODE_ENDPOINT is unset' };
+  }
+  console.log('   Gmail scrape found no code — asking the orchestrator (fallback)...');
+  const res = await orchestrator.emailCode({
+    query: opts.query || '', digits: opts.digits || null, jobUrl: opts.jobUrl || '', want: 'code',
+  });
+  if (res.ok && res.code) {
+    console.log(`   orchestrator returned a code${res.retried ? ' (after one retry)' : ''}.`);
+    return { code: res.code, via: 'endpoint' };
+  }
+  return { code: null, via: null, fallbackError: res.error || 'no code from the endpoint' };
+}
+
+// Same shape for confirmation links.
+async function getConfirmLinkOrFallback(context, opts = {}) {
+  const primary = await getConfirmLink(context, opts).catch(() => null);
+  if (primary) return { link: primary, via: 'browser' };
+
+  recordFallback('link');
+  if (!orchestrator.emailCodeEndpoint()) {
+    return { link: null, via: null, fallbackError: 'APPLY_AGENT_EMAIL_CODE_ENDPOINT is unset' };
+  }
+  console.log('   Gmail scrape found no confirm link — asking the orchestrator (fallback)...');
+  const res = await orchestrator.emailCode({
+    query: opts.query || '', jobUrl: opts.jobUrl || '', want: 'link',
+  });
+  if (res.ok && res.link) return { link: res.link, via: 'endpoint' };
+  return { link: null, via: null, fallbackError: res.error || 'no link from the endpoint' };
+}
+
+
+// ── Alphanumeric codes ────────────────────────────────────────────────────────
+//
+// extractCode() above matches \d{4,8}, which is right for the post-submit flows that
+// email a numeric OTP. Greenhouse asks for an 8-character ALPHANUMERIC code before it
+// will enable submit, and that pattern never matches it.
+//
+// Alphanumeric is harder to isolate than digits: an 8-character token of letters and
+// numbers looks a lot like an ordinary word. So this only accepts a candidate that
+// sits next to code-ish wording, or that mixes letters AND digits (real codes almost
+// always do; English words do not). A run of plain letters is rejected rather than
+// guessed at — a wrong code burns the attempt and the email.
+function extractCodeAlnum(text, length) {
+  if (!text) return null;
+  const L = length || 8;
+  // EXACT PHRASE FIRST (2026-09-14). Greenhouse writes, verbatim:
+  //   Copy and paste this code into the security code field on your application: Dj8jx5W0
+  // Three things below get that wrong. The `near` pattern cannot reach it: with the
+  // /i flag [^A-Z0-9] excludes letters, and there are whole words between the last
+  // anchor word and the code, so it always fell through to the weakest rule. That
+  // rule then requires a letter AND a digit, which discards a perfectly real code
+  // like MLKmlITN. And .toUpperCase() rewrites a code the email explicitly told us
+  // to copy and paste. Anchoring on the literal sentence removes the guessing that
+  // the strictness existed to prevent: whatever follows that colon IS the code -
+  // any length, any composition, in the case it was sent.
+  const exact = text.match(/security code field on your application:\s*([A-Za-z0-9]{5,14})/i);
+  if (exact) return exact[1];
+  const TOKEN = `[A-Z0-9]{${L}}`;
+
+  const mixed = (s) => /[A-Z]/.test(s) && /[0-9]/.test(s);
+
+  // Strongest: the token appears right after the words that introduce it.
+  const near = new RegExp(
+    `(?:code|verification|verify|security|one[- ]time)[^A-Z0-9]{0,40}(${TOKEN})\\b`, 'i');
+  const m1 = near.exec(text);
+  if (m1) return m1[1].toUpperCase();
+
+  // Or immediately before them ("XY12AB34 is your code").
+  const after = new RegExp(
+    `\\b(${TOKEN})[^A-Z0-9]{0,30}(?:is your|to (?:verify|submit|confirm))`, 'i');
+  const m2 = after.exec(text);
+  if (m2) return m2[1].toUpperCase();
+
+  // Last resort: a standalone token that mixes letters and digits.
+  const all = [...text.matchAll(new RegExp(`\\b(${TOKEN})\\b`, 'gi'))].map((m) => m[1].toUpperCase());
+  return all.find(mixed) || null;
+}
+
+// Same Gmail plumbing as getEmailCode, different extractor. Kept separate rather than
+// adding a flag so the digit path — which is working and in use by three handlers —
+// cannot regress from a change made for Greenhouse.
+async function getEmailCodeAlnum(context, { query = 'verification OR code OR security', length = 8, timeoutMs = 150000 } = {}) {
+  const tab = await context.newPage();
+  try {
+    if (!(await ensureGmail(tab))) return null;
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const text = await readNewestEmail(tab, query);
+      const code = extractCodeAlnum(text, length);
+      if (code) { console.log(`   retrieved ${length}-character email code: ${code}`); return code; }
+      await tab.waitForTimeout(5000);
+    }
+    return null;
+  } finally { await tab.close().catch(() => {}); }
+}
+module.exports = {
+  extractCodeAlnum, getEmailCodeAlnum,
+  getEmailCode, getConfirmLink, extractCode,
+  getEmailCodeOrFallback, getConfirmLinkOrFallback,
+};

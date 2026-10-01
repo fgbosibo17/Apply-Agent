@@ -37,6 +37,11 @@ function attentionAdd(input = {}) {
     url: input.url,
     persona: input.persona || '',
     roundId: input.roundId || '',
+    // WHICH MACHINE must resolve this. An attention item is almost always fixable only
+    // where it was raised: a login belongs to that machine's browser profile, and
+    // profiles are never copied between machines. Without this the digest can say a
+    // human is needed but not where to stand.
+    machineId: input.machineId || require('./machine').id(),
     // Never store the secret itself — only the fact that one is needed.
     summary: (input.summary || '').slice(0, 300),
     nextAction: (input.nextAction || '').slice(0, 300),

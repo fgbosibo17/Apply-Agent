@@ -9,7 +9,7 @@
 // Every export is pure and reads its policy from env once at require time:
 //   REMOTE_ONLY=1   hybrid roles are excluded too (remote only)
 //   ALLOW_BIG=1     famous big-cos are allowed back in
-//   RECENT_DAYS=N   drop postings older than N days (0 = no cutoff)
+//   RECENT_DAYS=N   drop postings older than N days (0 = no cutoff; default 60)
 //   TITLE_FILTER=re extra title regex applied ON TOP of persona matchKeywords
 
 const { isBigCompany, isAggregator, isPersonalExclude } = require('./company-filter');
@@ -18,7 +18,14 @@ const flag = (v) => /^(1|true|yes)$/i.test(v || '');
 
 const REMOTE_ONLY_MODE = flag(process.env.REMOTE_ONLY);
 const ALLOW_BIG = flag(process.env.ALLOW_BIG);
-const RECENT_DAYS = parseInt(process.env.RECENT_DAYS || '0', 10);
+// Default 21 days, not 0.
+//
+// This used to default to "no cutoff", so unless a caller remembered RECENT_DAYS the
+// queue accumulated postings of any age — one queue held a row 1021 days old. Three weeks
+// is long enough that a genuinely open role is still caught (boards routinely re-surface
+// and re-date active postings) and short enough that most of what is left is still live.
+// RECENT_DAYS=0 still disables the cutoff for a deliberate deep sweep.
+const RECENT_DAYS = parseInt(process.env.RECENT_DAYS === undefined ? '60' : (process.env.RECENT_DAYS || '0'), 10);
 const RECENT_CUTOFF = RECENT_DAYS > 0 ? Date.now() - RECENT_DAYS * 86400000 : 0;
 const TITLE_FILTER = process.env.TITLE_FILTER ? new RegExp(process.env.TITLE_FILTER, 'i') : null;
 
@@ -87,6 +94,8 @@ function locationEligible(loc, remoteFlag, workplaceType, title = '') {
 // Role fit for the active persona. `persona` is the object from src/answers.js.
 function titleEligible(title, persona) {
   const t = title || '';
+  // Salaried employment only - see NON_SALARIED_TITLE at the foot of this file.
+  if (NON_SALARIED_TITLE.test(t)) return false;
   if (!persona.matchKeywords.test(t)) return false;              // role fit
   if (TITLE_FILTER && !TITLE_FILTER.test(t)) return false;       // focused title filter
   if (persona.persona === 'qa' && HARDWARE_TITLE.test(t)) return false; // qa: skip hardware "test" roles
@@ -94,12 +103,20 @@ function titleEligible(title, persona) {
   return true;
 }
 
-// Recency gate. Jobs the source gives no date for are KEPT (rare) so we don't
-// over-drop.
+// Recency gate. A posting the source dated, older than the cutoff, is dropped.
+//
+// A posting the source gave NO date for is kept — but this is not the rare case the
+// original comment assumed. Measured: 700 of 983 rows in one queue were undated, so 71%
+// of that queue bypassed this filter. Dropping them all would empty the queue, so they
+// are kept and verified on the page instead: src/util/freshness.js detects an expired
+// posting after navigation and skips it cleanly rather than filling in a dead form.
+//
+// `undated()` exists so a caller can count them and report the size of that blind spot.
 function recentEnough(posted) {
   if (!RECENT_CUTOFF || !posted) return true;
   return posted >= RECENT_CUTOFF;
 }
+const undated = (posted) => !posted;
 
 // One call that answers "should this normalized job enter the queue?" — used by
 // every runner that produces the { title, location, remote, workplaceType,
@@ -114,7 +131,15 @@ function jobEligible(job, persona) {
 }
 
 module.exports = {
-  blockCompany, locationEligible, titleEligible, recentEnough, jobEligible,
+  blockCompany, locationEligible, titleEligible, recentEnough, undated, jobEligible,
+  RECENT_DAYS,
   DEFENSE_TOKENS, GOV_TITLE, HARDWARE_TITLE, TEXAS, FOREIGN, US_STRONG,
   REMOTE_ONLY_MODE, ALLOW_BIG, RECENT_CUTOFF, TITLE_FILTER,
 };
+
+// SALARIED EMPLOYMENT ONLY (2026-09-14, Fopes stated rule). A posting that pays
+// commission only, engages a 1099 contractor, or is survey / mystery-shopper /
+// franchise recruitment is not employment in the sense he means, whatever the
+// title calls it. Company-level blocking catches the boards that are entirely
+// this; this catches the individual posting on an otherwise legitimate board.
+const NON_SALARIED_TITLE = /(commission[\s-]?only|100%\s*commission|uncapped commission|\b1099\b|independent contractor|self[\s-]?employed|own your own business|be your own boss|unpaid intern|volunteer|equity[\s-]?only|franchise|distributor|\bmlm\b|survey taker|paid survey|focus group|mystery shopper|product tester)/i;

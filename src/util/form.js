@@ -2,7 +2,7 @@
 const a = require('../answers');
 const { textValueForLabel, optionForLabel, yesNoForLabel } = require('./answers-map');
 const { generateAnswer } = require('../answer-bank');
-const { getEmailCode } = require('./email-code');
+const { getEmailCodeOrFallback } = require('./email-code');
 const { getLearned, saveLearned } = require('./learned');
 
 // Best-effort label text for a field element (walks up to a label/legend/heading).
@@ -117,12 +117,42 @@ async function handleNativeSelects(scope) {
 
 // Safety net: fill ANY still-empty required field so a missed custom question
 // never silently blocks submit. Label-mapped value first, else a sensible default.
+// Honeypot fields: inputs a form renders only to catch automation. Workday names its
+// one beecatcher and labels it: Enter website. This input is for robots only, do not
+// enter if you are human. Other ATSes hide a box off-screen or at zero opacity.
+//
+// Filling one is how a submission gets scored as a bot. The generic pass below did
+// exactly that on every form that had one - a rendered honeypot passes isVisible(),
+// and a honeypot is often marked required precisely so a naive filler takes the bait.
+// Workday account creation failed silently this way, and it is the most likely source
+// of the flagged as possible spam rejections seen elsewhere.
+const HONEYPOT_NAME = /beecatcher|honeypot|honey_pot|hp_field|bot[-_]?trap|leave[-_]?blank|do[-_]?not[-_]?fill/i;
+const HONEYPOT_LABEL = /robots only|do not enter if you|leave this field (blank|empty)|if you are human/i;
+
+async function isHoneypot(el) {
+  const seen = await el.evaluate((e) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e);
+    return {
+      n: [e.name, e.id, e.getAttribute(`data-automation-id`)].filter(Boolean).join(` `),
+      sneaky: r.width < 4 || r.height < 4 || (r.left + r.width) < 0 || (r.top + r.height) < 0
+        || cs.opacity === `0` || cs.visibility === `hidden`,
+    };
+  }).catch(() => null);
+  if (!seen) return false;
+  if (HONEYPOT_NAME.test(seen.n)) return true;
+  if (seen.sneaky) return true;
+  const label = await labelOf(el).catch(() => ``);
+  return HONEYPOT_LABEL.test(label || ``);
+}
+
 async function fillRemainingRequired(scope) {
   // Required checkboxes are consent/acknowledgement ("I agree", "I certify") →
   // safe to check. (Single required checkbox on a job form is always consent.)
   for (const cb of await scope.$$('input[type="checkbox"]').catch(() => [])) {
     if (!(await cb.isVisible().catch(() => false))) continue;
     if (await cb.isChecked().catch(() => false)) continue;
+    if (await isHoneypot(cb)) continue;
     const required = await cb.evaluate((e) => e.required || e.getAttribute('aria-required') === 'true').catch(() => false);
     const label = await labelOf(cb);
     if (required || /consent|agree|privacy|terms|process my|gdpr|acknowledge|certify|i confirm/i.test(label)) {
@@ -137,6 +167,7 @@ async function fillRemainingRequired(scope) {
     // NEVER text-fill a react-select's internal input (type=text, role=combobox,
     // aria-required) — it has no inputValue when a value is chosen, so it looks
     // "empty", and typing into it CLEARS the already-selected option.
+    if (await isHoneypot(el)) continue;
     const role = await el.evaluate((e) => e.getAttribute('role') || '').catch(() => '');
     if (role === 'combobox') continue;
     if (!(await el.isVisible().catch(() => false))) continue;
@@ -249,21 +280,49 @@ async function confirmAfterSubmit(page, scope, { re, urlRe, rounds = 7, waitMs =
 }
 
 // After clicking submit, some ATSs (Workable, iCIMS) require an emailed code.
-// Detect a code-entry field, fetch the code from Gmail, type it, continue.
-async function handleEmailVerification(context, page, scope = page) {
+// Detect a code-entry field, fetch the code, type it, continue.
+//
+// The code comes from the browser first (Gmail in this same warm session) and only
+// then, if that returns null, from the orchestrator — see src/util/email-code.js.
+//
+// When no code can be had, this returns `{ needed: true, ok: false, attention: {...} }`
+// rather than pressing on. A form stuck on a code field is not submitted, so carrying
+// on would report a confirmation failure for a job that is actually just waiting on a
+// code. The caller skips the job and files the attention item, which keeps the job
+// actionable instead of losing it.
+async function handleEmailVerification(context, page, scope = page, meta = {}) {
   // Be specific: match true one-time-code fields, NOT "postcode"/"country code"/"area code".
   const codeInput = await (scope.$('input[autocomplete="one-time-code"], input[name="verification_code"], input[name*="verificationCode" i], input[id*="verification" i], input[name*="otp" i], input[placeholder*="verification code" i], input[aria-label*="verification code" i], input[placeholder*="confirmation code" i]').catch(() => null));
   if (!codeInput) return { needed: false };
   if (!(await codeInput.isVisible().catch(() => false))) return { needed: false };
   console.log('   email verification code required — checking Gmail...');
-  const code = await getEmailCode(context, { timeoutMs: 120000 });
-  if (!code) return { needed: true, ok: false };
+  const { code, via, fallbackError } = await getEmailCodeOrFallback(context, {
+    timeoutMs: 120000,
+    jobUrl: meta.url || page.url(),
+  });
+  if (!code) {
+    return {
+      needed: true,
+      ok: false,
+      reason: `email verification code required but unavailable${fallbackError ? ` (${fallbackError})` : ''}`,
+      attention: {
+        kind: 'other',
+        severity: 'blocking',
+        summary: 'This application needs an emailed verification code. Neither the '
+          + 'in-browser Gmail read nor the orchestrator fallback produced one.',
+        nextAction: 'Open the job, request a new code, and enter it by hand. If this '
+          + 'is happening for every job, the Gmail selectors have probably changed — '
+          + 'check `npm run agent -- friction list` for email-code:gmail-dom.',
+      },
+    };
+  }
+  if (via === 'endpoint') console.log('   code came from the orchestrator fallback, not the browser.');
   await codeInput.fill(code).catch(() => {});
   // submit the code
   const btn = await scope.$('button:has-text("Verify"), button:has-text("Confirm"), button:has-text("Submit"), button[type="submit"]').catch(() => null);
   if (btn) await btn.click().catch(() => {});
   await page.waitForTimeout(2500);
-  return { needed: true, ok: true, code };
+  return { needed: true, ok: true, code, via };
 }
 
 module.exports = {

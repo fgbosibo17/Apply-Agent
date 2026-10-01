@@ -226,7 +226,7 @@
     setText(['input[name="org"]', 'input[name="company"]'], p.currentEmployer, "Current employer");
     setText(['input[name="urls[LinkedIn]"]'], p.linkedIn, "LinkedIn");
     setText(['input[name="city"]'], p.city, "City");
-    setText(['input[name="postcode"]', 'input[name="zip"]'], p.zip || "77002", "Postcode");
+    setText(['input[name="postcode"]', 'input[name="zip"]'], p.zip || "", "Postcode");
 
     // Lever Google-Places location: set BOTH the visible + hidden field via native setter.
     const locEl = document.querySelector('input[name="location"]');
@@ -263,7 +263,7 @@
       else if (/address line ?1|street address|^address\b|mailing address/.test(l)) val = p.addressLine1 || null;
       else if (/\bcity\b/.test(l)) val = p.city;
       else if (/\bstate\b|province/.test(l)) val = p.stateFull;
-      else if (/\bzip\b|postal ?code|post code/.test(l)) val = p.zip || "77002";
+      else if (/\bzip\b|postal ?code|post code/.test(l)) val = p.zip || "";
       else if (/\bcountry\b/.test(l)) val = p.country;
       else if (/current location|where are you (located|based)|^location\b/.test(l)) val = p.fullAddress;
       // Work

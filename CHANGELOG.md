@@ -8,6 +8,56 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Newest first.
 
 ## [Unreleased]
+### Added — overnight server runs, more ATSs, resume tailoring (2026-10-01)
+- **Six more ATS handlers** — Workday, iCIMS, Jobvite, BambooHR, Breezy and
+  Rippling, plus Workday discovery (`src/discover-workday.js`) over the tenants
+  you list in `data/workday-boards.json`. Workday, iCIMS and Jobvite sign in or
+  register with `data/ats-accounts.json` (gitignored; copy the `.example`).
+- **One run envelope** — `npm run go -- <persona>` (interactive, submits) and
+  `scripts/nightly-run.sh <persona>` (scheduled, dry unless `--live`) do git
+  pull, deps, doctor, state pull, a round with lock + semaphore + preflight,
+  discovery, optional tailoring, the apply batches, and a digest JSON on stdout
+  on every path, failures included.
+- **Running all night on a server** — `scripts/nightly-orchestrator.sh`
+  round-robins every persona toward a per-persona target, stops before the next
+  night, and never overlaps itself; `scripts/persona-push.sh` gets one persona to
+  a number now; `scripts/bootstrap.sh` + `npm run doctor` set up and verify a new
+  box (real Chrome, xvfb, disk, profiles, resumes, S3); `scripts/with-display.sh`
+  runs headful Chrome on a virtual display.
+- **Parallel sessions** — `PARALLEL_SESSIONS` in `src/personas.js` runs one
+  persona as several browsers with their own profiles and queues and one shared
+  ledger; `scripts/parallel-session.sh`, `scripts/watchdog-sessions.sh` and
+  `scripts/redistribute-queues.py` keep them fed and alive.
+- **Multi-machine safety** — cross-machine profile locks and a per-host browser
+  semaphore (`src/core/locks.js`), state sync over S3 that refuses to carry a
+  browser profile, a schema gate, disk-space preflight, and graceful
+  `round stop`.
+- **Optional alerts** — `scripts/notify-telegram.py` (end-of-run summary) and
+  `scripts/gmail-session-check.py` (a profile lost its Google session, so email
+  security codes would fail).
+- **Resume tailoring** (`--tailor`, opt-in) — rewords and reorders only what the
+  base resume already says, verified before upload; markdown sources kept,
+  rendered PDFs garbage-collected (`npm run agent -- gc`).
+- **Pre-submit answer review** and **posting freshness** checks, Greenhouse
+  email-code verification, cover letters only when a form requires one,
+  browser hygiene for bot-scoring cookies, and `src/trace-report.js`.
+- **Company rules** — never re-apply to the same role at a company, one persona
+  per company (`src/core/company-cap.js`), a salaried-only filter, priority
+  companies (`data/priority-companies.json`) and a per-ATS pause
+  (`data/ats-hold.json`).
+
+### Changed — 2026-10-01
+- **One browser profile per ACCOUNT, not per persona**: `profileKey` in
+  `src/personas.js` (the template's `adjacent` shares `primary`'s profile).
+- **EEO answers come only from the persona** (`src/util/eeo.js`). Gender, race,
+  pronouns, Hispanic/Latino, veteran and disability were partly hard-coded; an
+  unset field now picks the form's decline option instead of a guess.
+- The personal company blocklist moved out of the code into
+  `data/personal-exclude.json` (gitignored). State, ZIP and salary fallbacks no
+  longer default to fixed values.
+- Default posting recency window is 60 days; the default company reapply
+  cooldown is "never" (9999 days, `APPLY_AGENT_COMPANY_REAPPLY_COOLDOWN_DAYS`).
+
 ### Added
 - **Decision CLI (`node bin/apply-agent.js`)** — a dependency-free layer that owns
   every judgement that shouldn't be made from memory. Reads JSON on stdin, writes

@@ -8,8 +8,12 @@ const { textValueForLabel } = require('../util/answers-map');
 const { fillLocation } = require('../util/location');
 const { handleCaptcha } = require('../util/captcha');
 const { labelOf, handleRadioGroups, handleNativeSelects, fillRemainingRequired, proofread, dryRunStop, confirmAfterSubmit, handleEmailVerification } = require('../util/form');
+const { attachResume } = require('../resume/upload');
+const { gateBeforeSubmit } = require('../util/answer-review');
 
+const trace = require("../util/trace");
 async function applyAshby(page, jobMeta) {
+  trace.stage("ashby");
   let url = page.url();
   if (!/\/application\b/.test(url)) {
     await page.goto(url.replace(/\/$/, '') + '/application', { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -28,12 +32,17 @@ async function applyAshby(page, jobMeta) {
   }
 
   // ── Resume upload (autofills name/email on Ashby) ──
-  const uploadBtn = await page.$('button:has-text("Upload file")');
-  if (uploadBtn) {
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser').catch(() => null), uploadBtn.click().catch(() => {})]);
-    if (chooser) { await chooser.setFiles(a.resumePath).catch(() => {}); await page.waitForTimeout(3000); }
-  }
-  await page.locator('input#_systemfield_resume').setInputFiles(a.resumePath).catch(() => {});
+  // Ashby clears the file input after uploading to its own store, so confirmation
+  // falls back to the filename appearing in the widget. The previous version
+  // swallowed every upload error and continued to submit; now an unusable file or
+  // an unconfirmed upload stops this application.
+  trace.stage("ashby:resume");
+  const up = await attachResume(page, page, a.resumePath, {
+    selectors: ['input#_systemfield_resume', 'input[type="file"]'],
+    buttonTexts: ['Upload file'],
+    settleMs: 3000,
+  });
+  if (!up.ok) return up.result;
   await page.waitForTimeout(800);
 
   // ── System fields ──
@@ -102,6 +111,21 @@ async function applyAshby(page, jobMeta) {
   // ── Captcha (invisible reCAPTCHA → auto-pass) ──
   await handleCaptcha(page, page).catch(() => {});
 
+
+  // ── Pre-submit review: ground every answer against the persona ──────────
+  //
+  // The last look before an irreversible action. Reads the filled form back out of the
+  // DOM and checks it against the persona: identity fields deterministically (always),
+  // then a model review of every answer when one is reachable. A finding it can ground is
+  // corrected in place; one it cannot blocks the submit and raises an attention item, so
+  // the job stays actionable rather than being sent wrong.
+  //
+  // Before the dry-run stop on purpose: a dry run should exercise the review too, which is
+  // how the quality is inspectable before anything goes live.
+  trace.stage("ashby:review");
+  const reviewBlock = await gateBeforeSubmit(page, page, { persona: a, jobMeta });
+  if (reviewBlock) return reviewBlock;
+
   const dry = await dryRunStop(page, jobMeta && jobMeta.company, await unfilledNote(page));
   if (dry) return dry;
 
@@ -113,9 +137,11 @@ async function applyAshby(page, jobMeta) {
     await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button')).find(x => /Submit Application/i.test(x.innerText)); b?.click(); });
   });
 
-  // Some Ashby flows email a verification code before finalizing.
+  // Some Ashby flows email a verification code before finalizing. Without the code the
+  // application is not finalized, so skip and keep the job actionable.
   const ctx = page.context();
-  await handleEmailVerification(ctx, page).catch(() => {});
+  const verify = await handleEmailVerification(ctx, page, page, jobMeta).catch(() => ({ needed: false }));
+  if (verify.needed && !verify.ok) return { status: 'Skipped', reason: verify.reason, attention: verify.attention };
 
   // Bail FAST on a validation error (Ashby shows "needs corrections" within ~3s)
   // instead of waiting out the full reCAPTCHA confirm window.
@@ -125,6 +151,7 @@ async function applyAshby(page, jobMeta) {
   if (earlyErr) return { status: 'Error', reason: 'Validation: ' + earlyErr.replace(/\s+/g, ' ').slice(0, 150) };
 
   // No validation error → wait for the success state (invisible reCAPTCHA can take ~30s).
+  trace.stage("ashby:confirm");
   if (await confirmAfterSubmit(page, page, {
     re: /your application.*(was )?(successfully )?submitted|application (was )?(successfully )?(submitted|received)|thank you for (applying|your (application|interest))|we('| ha)ve received your application|we will (be in touch|review your application|contact you)|successfully submitted|submission (received|complete)/i,
     rounds: 14, waitMs: 2500,

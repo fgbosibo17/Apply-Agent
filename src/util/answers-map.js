@@ -9,6 +9,7 @@
 // open questions.
 
 const { generateAnswer } = require('../answer-bank');
+const { pickEeo } = require('./eeo');
 
 // Free-text / single-line value for a labeled field.
 function textValueForLabel(label, a) {
@@ -22,11 +23,12 @@ function textValueForLabel(label, a) {
   if (/e-?mail/.test(l)) return a.email;
   if (/phone|mobile|cell/.test(l)) return a.phoneFull;
   if (/how did you hear|how.*(find|learn).*(job|role|position|us|company|employer)|learn about|referral source|^\s*source\s*\*?\s*$|lead source|^how did you find/.test(l)) return a.howDidYouHear;
-  if (/linkedin/.test(l)) return a.linkedIn;
+  if (/linkedin/.test(l)) return a.linkedIn || '';
   if (/github/.test(l)) return a.github || a.linkedIn;
   if (/twitter|^x (handle|profile)/.test(l)) return '';
   if (/website|portfolio|personal site|professional website|other links?/.test(l)) return a.portfolio;
   if (/desired salary|salary range|salary expectation|compensation|expected pay|desired pay|pay expectation|expectation salary|salary per annum|annual salary|expected compensation/.test(l) && !/current salary|salary history|last salary|present salary/.test(l)) return a.salaryRangeString;
+  if (/ideal.*pay|pay.*range|annual.*pay|base salary|salary.*expect/i.test(l)) return a.salaryRangeString;
   if (/how many years|years of (professional )?experience|years.*experience/.test(l)) return String(a.totalYearsExperience);
   if (/current (company|employer)|company name|employer name|(present|recent|previous) employer|name of.*(present|current|recent|previous).*(company|employer)|most recent (company|employer)/.test(l)) return a.currentEmployer;
   if (/current (title|role|position)|job title/.test(l)) return a.currentTitle;
@@ -53,9 +55,17 @@ function textValueForLabel(label, a) {
   if (/^city$|which city|city you|city of residence/.test(l)) return a.city;
   if ((/(which|what|your|home|current).{0,15}\bstate\b|state of residence|^state\b|\bstate\s*\/\s*province\b/.test(l)) && !/united states/.test(l)) return a.stateFull;
   if (/\bprovince\b/.test(l)) return a.stateFull;
-  if (/zip|postal/.test(l)) return a.zip || '77002';
+  if (/zip|postal/.test(l)) return a.zip || '';
   if (/country of (residence|citizenship)|^country\b(?!\s*code)|your country|which country/.test(l)) return a.country;
   if (/^address|street address|address line/.test(l)) return a.fullAddress;
+  // Where do you live / current location text fields
+  if (/where do you (currently )?live|current (city|location|address)|city.*state|where are you based|where.*located/i.test(l)) return (a.city || 'Austin') + ', TX';
+  // Employer/company website
+  if (/employer website|company website|employer.*url|company.*url/i.test(l) && !/linkedin|github|portfolio/i.test(l)) return 'https://www.linkedin.com';
+  // Early-stage startup
+  if (/early.?stage startup|startup.*worked for/i.test(l)) return 'I have not worked at early-stage startups prior to this application.';
+  // Percentage of time spent breakdown
+  if (/typical day.*percent|percentage.*time.*spent|time.*spent.*percent/i.test(l)) return '25';
   // A YES/NO-phrased question (starts with an auxiliary verb) must get "Yes"/"No",
   // NEVER a generated essay. Open questions ("What/Why/How/Describe/Tell us…") are
   // not auxiliary-verb-initial, so they still fall through to the essay generator.
@@ -80,6 +90,7 @@ function yesNoForLabel(label, a) {
   // "Prepared/submitted by AI?" → No (per user instruction).
   if (/(prepared|submitted|completed|written|generated|created)\b.{0,70}\b(by|with|using|via)\b.{0,25}(ai\b|a\.i\.|gpt|llm|language model|automat|bot|chatgpt|machine)|in whole or in part by an? (ai|automat|language model)|use[ds]?\b.{0,15}(ai|chatgpt|gpt|an ai|a language model|llm).{0,40}(prepar|complet|fill|writ|generat|appl)|\bai[- ]?(generated|prepared|assisted|written|completed)\b/.test(l)) return 'No';
   if (/felony|convicted|criminal (record|history|conviction)|been charged/.test(l)) return 'No';
+  if (/federal government|state.*government|government entity|military service/i.test(l) && /employed|work(ed)?/i.test(l)) return 'No';
   if (/related to.*(employee|someone who works|current).*?|do you know (anyone|someone).*works/.test(l)) return 'No';
   if (/sponsor/.test(l)) return 'No';
   if (/entitled.*work.*canada|authoriz.*canada|work.*in canada/.test(l)) return 'No';
@@ -93,6 +104,7 @@ function yesNoForLabel(label, a) {
   if (/background check|drug (test|screen)|consent/.test(l)) return 'Yes';
   if (/linkedin profile|do you have.*linkedin/.test(l)) return 'Yes';
   if (/based in (the )?(us|u\.s\.|united states)|located in (the )?(us|united states|north america|americas)|reside in (the )?(us|united states)|physically located|located in any of the following|located in north america/.test(l)) return 'Yes';
+  if (/do you live in one of the listed states|listed states.*hire/i.test(l)) return 'Yes';
   if (/(do you have|have you|are you|do you possess).*(experience|years|proficien|familiar|worked|skill|knowledge)|at least \d+\s*year|\d+\+?\s*years|minimum.*year/.test(l)) return 'Yes';
   if (/degree|bachelor|master|education|graduat/.test(l)) return 'Yes';
   if (/join.*office|in.?office|on-?site|in.?person|come (in|into)|days?\/?\s*week|hybrid|commute|open to working/.test(l)) return 'Yes';
@@ -117,27 +129,24 @@ function optionForLabel(label, options, a) {
   // "Yes, I am a protected veteran" when the label was missed.
   const optBlob = options.join(' || ').toLowerCase();
   if (/have a disability|do(n't| not) have a disability|history (of|or record of) a disability/.test(optBlob)) {
-    return find(/no,? i (don'?t|do not)|do not have a disability|don'?t have a disability/i) || find(/^\s*no\b/i);
+    return pickEeo('disability', options, a);
   }
   if (/protected veteran|identify as.*veteran|not a (protected )?veteran|one or more.*veteran/.test(optBlob)) {
-    return find(/i am not a (protected )?veteran|not a (protected )?veteran|i am not/i) || find(/^\s*no\b/i);
+    return pickEeo('veteran', options, a);
   }
-  // Race/ethnicity multi-option list (contains "Black or African American" plus
-  // other races). Check BEFORE hispanic — a full race list also lists "Hispanic
-  // or Latino" as one option but is NOT the hispanic yes/no question.
-  if (/black or african american/.test(optBlob)) {
-    return find(/black or african american/i);
-  }
-  if (/\bblack\b/.test(optBlob) && /(white|asian|indigenous|brown|two or more|native|pacific)/.test(optBlob)) {
-    return find(/black or african/i) || find(/^\s*black\s*$/i) || find(/\bblack\b/i);
+  // Race/ethnicity multi-option list. Check BEFORE hispanic — a full race list
+  // also lists "Hispanic or Latino" as one option but is NOT the hispanic yes/no
+  // question. Answered from the persona (src/util/eeo.js), never assumed.
+  if (/black or african american|(white|asian).*(black|indigenous|two or more|native|pacific)|(black|indigenous|two or more|native|pacific).*(white|asian)/.test(optBlob)) {
+    return pickEeo('race', options, a);
   }
   // Hispanic/Latino yes-no question — only when the NEGATION ("Not Hispanic or
   // Latino") is present, which distinguishes it from a race list.
   if (/not hispanic or latino/.test(optBlob)) {
-    return find(/not hispanic or latino|not hispanic/i) || find(/^\s*no\b/i);
+    return pickEeo('hispanic', options, a);
   }
   if (/(^|[|\s])(male)([|\s]|$)/.test(optBlob) && /(female|non-?binary|prefer not|decline)/.test(optBlob)) {
-    return find(/^\s*male\b/i) || find(/^\s*man\b/i);
+    return pickEeo('gender', options, a);
   }
   // "How did you hear about us" rendered as an option list of SOURCES (the label
   // is often missed on Ashby radio groups). Detect by content: LinkedIn present
@@ -148,14 +157,14 @@ function optionForLabel(label, options, a) {
   }
 
   // Demographic / EEO (by label)
-  if (/transgender/.test(L)) return find(/^\s*no\b/i) || find(/prefer not|decline|do(n'?t| not) wish/i);
-  if (/pronoun/.test(L)) return find(/he\s*\/\s*him/i) || find(/prefer not/i);
-  if (/gender/.test(L)) return find(/^\s*male\b/i) || find(/man/i);
-  if (/hispanic|latino/.test(L)) return find(/not hispanic|^\s*no\b/i);
-  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return find(/black or african/i) || find(/^black$/i) || find(/\bblack\b/i);
-  if (/veteran/.test(L)) return find(/not a (protected )?veteran|i am not|^\s*no\b/i);
-  if (/disab/.test(L)) return find(/no,? i (don|do not)|^\s*no\b|not have a disability/i);
-  if (/sexual orientation|lgbt/.test(L)) return find(/hetero|straight|prefer not/i);
+  if (/transgender/.test(L)) return pickEeo('transgender', options, a);
+  if (/pronoun/.test(L)) return pickEeo('pronouns', options, a);
+  if (/gender/.test(L)) return pickEeo('gender', options, a);
+  if (/hispanic|latino/.test(L)) return pickEeo('hispanic', options, a);
+  if (/\brace\b|ethnicity|skin colou?r/.test(L)) return pickEeo('race', options, a);
+  if (/veteran/.test(L)) return pickEeo('veteran', options, a);
+  if (/disab/.test(L)) return pickEeo('disability', options, a);
+  if (/sexual orientation|lgbt/.test(L)) return pickEeo('orientation', options, a);
 
   // Years-of-experience range dropdowns ("1-3 years", "4-7 years", "8+ years").
   if (/how many years|years of|years.*experience|experience.*years|level of experience|seniority/.test(L) && options.some((o) => /\d/.test(o))) {
@@ -174,7 +183,7 @@ function optionForLabel(label, options, a) {
 
   // Logistics
   if (/which.*state|state.*province|state.*reside|province.*reside|where.*(do you )?reside|state or|what.*state/.test(L)) {
-    return find(new RegExp('^\\s*' + (a.stateFull || 'Texas') + '\\b', 'i')) || find(/texas|^TX$/i) ||
+    return (a.stateFull && find(new RegExp('^\\s*' + a.stateFull + '\\b', 'i'))) || (a.state && find(new RegExp('^\\s*' + a.state + '\\s*$', 'i'))) ||
            find(/none of the above|not listed|other|none apply|n\/a/i); // our state not offered
   }
   if (/country/.test(L)) return find(/united states|^usa$|u\.s\.a?\.?$|america/i);
@@ -192,8 +201,8 @@ function optionForLabel(label, options, a) {
   if (/type of employment|employment type|preferred.*employment|work type/.test(L)) {
     return find(/full[- ]?time|permanent/i) || find(/contract|any|open/i);
   }
-  if (/how would you describe your (racial|race|ethnic)|race|ethnicity/.test(L)) return find(/black or african/i) || find(/prefer not|decline/i);
-  if (/gender( identity)?|how.*identify/.test(L)) return find(/^man$|^male$/i) || find(/male|man/i) || find(/prefer not|decline/i);
+  if (/how would you describe your (racial|race|ethnic)|race|ethnicity/.test(L)) return pickEeo('race', options, a);
+  if (/gender( identity)?|how.*identify/.test(L)) return pickEeo('gender', options, a);
   if (/how did you|learn about|hear about|find out about|referral source|hear of|^\s*source\s*\*?\s*$|lead source/.test(L)) {
     return find(/^\s*linkedin\b/i) || find(/linkedin/i) || find(/job board/i) || find(/other/i);
   }
@@ -202,6 +211,17 @@ function optionForLabel(label, options, a) {
   }
   if (/sponsor/.test(L)) return find(/will not need|do not (require|need)|no,? i|^\s*no\b/i) || no();
   if (/authoriz|eligible to work|right to work|legally/.test(L)) return find(/^\s*yes\b|i am authorized|will not need sponsorship/i) || yes();
+  if (/work authorization|work auth/i.test(L)) return find(/us citizen|authorized|eligible/i) || find(/no sponsor/i) || yes();
+  // Fix 6: WOTC — answer None/No
+  if (/wotc|work opportunity tax credit|tax credit.*survey/i.test(L)) return find(/none|decline|skip|not applicable/i) || find(/i do not/i) || no();
+  // Fix 12: Rockbot values
+  if (/rockbot.*value|value.*resonat/i.test(L)) return find(/win together|be real|think big|own it/i);
+  // Fix 14: listed states
+  if (/do you live in one of the listed states|listed states.*hire/i.test(L)) return yes();
+  // Fix 15: hybrid schedule
+  if (/hybrid work schedule|hybrid.*schedule/i.test(L)) return yes();
+  // Fix 16: work arrangement → remote first
+  if (/work arrangement|working arrangement/i.test(L)) return find(/remote/i) || find(/hybrid/i);
   if (/relocat/.test(L)) return a.willingToRelocate === 'Yes' ? yes() : no();
   if (/hybrid|office|on-?site|in.?person|days?\/?\s*week|open to working/.test(L)) return yes();
 

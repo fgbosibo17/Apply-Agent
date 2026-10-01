@@ -1,0 +1,4 @@
+{
+  "_comment": "Board tokens swept BEFORE the capped general sweep, never truncated, and EXEMPT from the big-company and aggregator filters (that is the point of naming them). NEVER exempt from the personal blocklist (data/personal-exclude.json). Keyed by persona, or `_all` for every persona; only ATSs with an open discovery API belong here (greenhouse, lever, ashby, workable, smartrecruiters). Example: \"primary\": { \"greenhouse\": [\"acme\"], \"lever\": [\"examplecorp\"] }",
+  "_all": {}
+}

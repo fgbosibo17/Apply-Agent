@@ -84,6 +84,94 @@ LOGGED_IN_BOARDS: linkedin, builtin, wellfound, workatastartup, welcometothejung
 > listings are logged `Skipped` (reason: "Easy Apply only - external-ATS-only mode").
 > `src/ats/linkedin-easyapply.js` exists but is intentionally NOT wired into the runner.
 
+---
+
+## 🔒 DECISION CLI — run it, don't reason about it
+
+> ## 🚦 HOW TO START A RUN — `scripts/go.sh`, NEVER the raw runner
+>
+> **When the user says "go" for a batch run, run `npm run go -- <persona>`. Nothing else.**
+>
+> ```bash
+> npm run go -- primary                # apply as primary
+> npm run go -- secondary --max 15     # cap the session
+> npm run go -- primary --dry-run      # fill and screenshot, submit nothing
+> npm run go -- adjacent --tailor      # tailor each resume to its posting first
+> ```
+>
+> **Never call `node src/index.js` or `node src/run-loop.js` directly.** They are the
+> inner runner and the batch loop; they do not take the cross-machine lock and they do
+> not sync state. Calling them directly means:
+>
+> - **no profile lock** — a laptop and a server can run the same browser profile at
+>   the same time, fork the ledger, and apply to the same job twice
+> - **no state pull/push** — the run reads a stale ledger and its results never reach the
+>   other machine
+> - **no schema gate** — an older checkout silently drops fields newer code wrote
+> - **no digest** — the run reports nothing an orchestrator can read
+>
+> `scripts/go.sh` is the envelope that does all of it: git pull, deps, doctor, state
+> pull, round start (lock + semaphore + resume/disk/schema preflight), discovery,
+> tailoring, the apply batches via `scripts/run-persona.sh`, round complete, commit and
+> push, GC, state push, and a digest on stdout. `scripts/nightly-run.sh` is the same
+> envelope for the scheduled and remote-triggered path (dry run unless `--live`), and
+> `scripts/nightly-orchestrator.sh` runs every persona overnight — see ONBOARDING.md,
+> "Running on a second machine".
+>
+> **There is no default persona.** Ask which one if the user did not say — each can be a
+> different identity, and applying as the wrong one puts the wrong name and resume in
+> front of an employer.
+>
+> If a run is refused, the reason is on stderr with the holder and its heartbeat age:
+> wait, run a persona on a different profile, or
+> `npm run agent -- round unlock --force --persona <p>` if that run is definitely dead.
+> To stop a run in flight: `npm run agent -- round stop --round <id>`.
+
+> **Agent: every decision below is settled by `node bin/apply-agent.js`, not by
+> your judgement. If you are about to reason about whether a job is a duplicate,
+> whether a score clears the bar, or whether you may submit without asking —
+> run the command instead.** Each reads JSON on stdin and writes JSON to stdout.
+
+```bash
+node bin/apply-agent.js score --stdin          # gate: exclude | ask | skip | review (+ autoEligible)
+node bin/apply-agent.js ledger check --stdin   # duplicate + company-cooldown gate — BEFORE every apply
+node bin/apply-agent.js ledger add --stdin     # AFTER a visible confirmation only
+node bin/apply-agent.js ledger outcome --stdin # rejection / interview / offer, with a structured reason
+node bin/apply-agent.js ledger review          # what actually converted, by source and score band
+node bin/apply-agent.js autonomy status        # review-each vs routine-auto (time-boxed)
+node bin/apply-agent.js attention add --stdin  # park anything that needs the user
+node bin/apply-agent.js friction record --stdin# reproducible tooling failure; never blocks an apply
+node bin/apply-agent.js round start --stdin    # one ID across a whole batch run
+node bin/apply-agent.js doctor                 # is this machine ready to run? (npm run doctor)
+```
+
+**Rules that override anything else in this file:**
+
+1. **Gate before score.** `MIN_MATCH_SCORE` is a coarse pre-filter. The real
+   decision is the `gate` returned by `score`: `exclude` never applies, `ask`
+   goes to the user, `skip` is logged, only `review` proceeds.
+2. **`autoEligible: true` is necessary, never sufficient.** Auto-submission also
+   requires `autonomy status` to be `routine-auto` and unexpired.
+   `APPLY_MODE: auto` in SESSION CONFIG does **not** grant autonomy on its own.
+3. **A filled form is not a submission.** `ledger add` refuses an entry without
+   confirmation evidence, and nothing is logged as `Applied` without a visible
+   confirmation state.
+4. **Stop in every mode** for passwords, SSO, MFA, CAPTCHA, legal attestations,
+   government identifiers, unclear work authorization or compensation, and any
+   claim not verifiable from the persona or resume. No autonomy grant lifts this.
+5. **Park, don't drop.** A blocker becomes an `attention` item and the run
+   continues; a tooling failure becomes a `friction` record and the run continues.
+6. **Append-only.** Never delete or rewrite a row in `.state/applications.ndjson`
+   or `.state/outcomes.ndjson`.
+7. **Nothing leaves the machine.** No telemetry, no community sharing, no
+   analytics endpoint. Before any push, run `npm run privacy-audit:strict`.
+8. **Real Chrome, headful, always.** On a headless server the browser runs under
+   `scripts/with-display.sh` (xvfb). Never "fix" a server failure with
+   `headless: true` — CAPTCHA scoring silently rejects headless sessions.
+9. **Browser profiles never move between machines.** Each machine logs in once,
+   locally (over VNC on a server). A copied profile carries the wrong device
+   fingerprint, and it holds live session cookies.
+
 **How the agent uses this config:**
 1. At session start, the agent reads this block and uses these values for the entire session.
 2. `SESSION_TARGET` is the *primary* stop condition — once that many applications are SUCCESSFULLY SUBMITTED (logged as `Applied` in `applications-log.csv` after reaching a confirmation page), the agent stops and reports. Anything logged as `Skipped`, `Error`, `Closed`, or `Duplicate` does NOT count toward the target — keep going until 40 real submissions land.
@@ -95,20 +183,20 @@ LOGGED_IN_BOARDS: linkedin, builtin, wellfound, workatastartup, welcometothejung
 
 ## 🎭 PERSONAS (3 resumes, 2 identities — READ THIS BEFORE APPLYING)
 
-> The agent applies as **three personas across two identities**. Persona definitions (full answer sets) live in `src/personas.js`. Select with the `PERSONA` env var when running batch scripts (`qa` | `cloud` | `fullstack`). **There is NO default persona — every run must state one explicitly, and the agent must ASK THE USER which persona(s) to run when the user hasn't said.** Same for manual MCP applications: before applying, confirm which persona the job belongs to.
+> The template ships **three example personas across two identities** — keep the ones you need. Persona definitions (full answer sets) live in `src/personas.js`. Select with the `PERSONA` env var or the first argument of the run scripts (`primary` | `adjacent` | `secondary`). **There is NO default persona — every run must state one explicitly, and the agent must ASK THE USER which persona(s) to run when the user hasn't said.** Same for manual MCP applications: before applying, confirm which persona the job belongs to.
 
 | Persona | Identity | Email | Phone | LinkedIn | Resume | Browser profile |
 |---------|----------|-------|-------|----------|--------|-----------------|
 | **primary** | <Your Full Name> | you@example.com | +1 000-000-0000 | linkedin.com/in/your-handle | `Resume/Your_Resume_A.pdf` | `./browser-profile-primary` |
-| **adjacent** | <Your Full Name> | you2@example.com | +1 000-000-0000 | linkedin.com/in/your-handle-2 | `Resume/Your_Resume_B.pdf` | `./browser-profile-secondary` |
+| **adjacent** | <Your Full Name> | you@example.com | +1 000-000-0000 | linkedin.com/in/your-handle | `Resume/Your_Resume_B.pdf` | `./browser-profile-primary` (shared with primary) |
 | **secondary** | <Your Full Name> | you2@example.com | +1 000-000-0000 | linkedin.com/in/your-handle-2 | `Resume/Your_Resume_C.pdf` | `./browser-profile-secondary` |
 
 **Hard rules:**
-1. **Never mix identities on one application.** Resume header, form answers, and the logged-in job-board account must ALL match the persona. Cloud + FullStack share accounts/logins; QA is fully separate.
-2. **Route jobs by JD:** QA/SDET/testing keywords → `qa`. Cloud/DevOps/SRE/platform → `cloud`. Full-stack/frontend/backend/software engineer → `fullstack`. Router: `routePersona()` in `src/personas.js`.
+1. **Never mix identities on one application.** Resume header, form answers, and the logged-in job-board account must ALL match the persona. `primary` + `adjacent` share one identity, so they share accounts/logins and one browser profile (`profileKey`); `secondary` is fully separate.
+2. **Route jobs by JD:** each persona's `matchKeywords` decides which jobs it claims, in the priority order of `routePersona()` in `src/personas.js`.
 3. **Per-persona dedupe:** the same job may be applied to by ONLY ONE persona — never apply twice to one job with different identities.
-4. **Browser profiles:** re-run logins with `node setup-browser-login.js primary` or `node setup-browser-login.js secondary`. Both identities have accounts on: LinkedIn, Builtin, Wellfound, WorkAtAStartup, WelcomeToTheJungle, Dice, ZipRecruiter, Indeed (same account covers SimplyHired). NoDesk + WorkingNomads are aggregators — no login, click through to the company ATS.
-5. The `📝 APPLICATION ANSWERS` block below remains the source of truth for the **qa** persona only. Cloud/FullStack values live in `src/personas.js`.
+4. **Browser profiles:** one per ACCOUNT, derived from `profileKey` at the bottom of `src/personas.js` — never invent a profile name. Re-run logins with `node setup-browser-login.js primary` or `node setup-browser-login.js secondary`. Both identities have accounts on: LinkedIn, Builtin, Wellfound, WorkAtAStartup, WelcomeToTheJungle, Dice, ZipRecruiter, Indeed (same account covers SimplyHired). NoDesk + WorkingNomads are aggregators — no login, click through to the company ATS.
+5. The `📝 APPLICATION ANSWERS` block below mirrors the **primary** persona for the Claude-driven path. The headless runner reads `src/personas.js`; when the two disagree, personas.js wins — update this file to match.
 
 ---
 
@@ -151,7 +239,7 @@ AUTHORIZED_TO_WORK_US: "Yes"
 NEED_SPONSORSHIP_NOW: "No"
 NEED_SPONSORSHIP_FUTURE: "No"
 US_CITIZEN: "No"
-WORK_AUTH_STATUS: Green Card / Permanent Resident
+WORK_AUTH_STATUS: <e.g. US Citizen | Green Card / Permanent Resident | H1B>
 
 # ─── SALARY EXPECTATIONS (required) ─────────────────────────────────────────
 SALARY_MIN: 95000
@@ -217,7 +305,7 @@ UNDERGRAD_SCHOOL: <Your University>
 # ─── CURRENT JOB (required) ─────────────────────────────────────────────────
 CURRENT_EMPLOYER: <Current Employer>
 CURRENT_TITLE: <Your Current Title>
-TOTAL_YEARS_EXPERIENCE: 9
+TOTAL_YEARS_EXPERIENCE: <N>
 
 # ─── RESUME (required) ──────────────────────────────────────────────────────
 RESUME_FILE: Resume/Your_Resume_A.pdf
@@ -411,8 +499,8 @@ SPEAKING_SAMPLES_URL:
 YEARS_AT_CURRENT_EMPLOYER:
 CAN_CONTACT_PAST_EMPLOYERS: "Yes"
 NOTIFY_PERIOD_TO_CURRENT_EMPLOYER: 2 weeks
-CURRENT_EMPLOYER_LOCATION: Boston, MA (Remote)
-CURRENT_EMPLOYER_INDUSTRY: Healthcare / Telehealth
+CURRENT_EMPLOYER_LOCATION:
+CURRENT_EMPLOYER_INDUSTRY:
 
 # ─── COVER LETTER EXTRAS (optional) ─────────────────────────────────────────
 COVER_LETTER_SAVE_DIR: cover-letters/

@@ -1,0 +1,7 @@
+
+# Append-only logs: keep both sides on merge instead of conflicting.
+# secondary on one machine and primary on another both append to the same ledger,
+# and a hand-resolved merge on this file silently breaks duplicate checks.
+*.ndjson merge=union
+applications-log.csv merge=union
+seen-jobs.csv merge=union

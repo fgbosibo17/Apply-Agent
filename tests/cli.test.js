@@ -71,8 +71,50 @@ test('autonomy, attention and round commands are reachable end to end', () => {
   assert.equal(run(['autonomy', 'revoke']).out.granted, false);
   run(['attention', 'add', '--stdin'], { kind: 'captcha', url: 'https://x.example/1' });
   assert.equal(run(['attention', 'list']).out.length, 1);
-  const round = run(['round', 'start', '--stdin'], { persona: 'qa', target: 5 });
-  assert.equal(run(['round', 'status', round.out.id]).out.remaining, 5);
+
+  // `round start` runs preflight's blocking subset, so its outcome depends on the
+  // machine running the test. Both outcomes are part of the contract and both are
+  // asserted: CI has no Chrome, no installed deps and no resumes (they are
+  // gitignored), so there it must REFUSE with structured JSON and a remedy. A
+  // developer machine that is actually ready starts the round.
+  const round = run(['round', 'start', '--stdin'], { persona: 'secondary', target: 5 });
+  if (round.ok) {
+    assert.equal(run(['round', 'status', round.out.id]).out.remaining, 5);
+  } else {
+    assert.equal(round.status, 1, 'a refusal must exit non-zero');
+    assert.match(round.out.error, /preflight failed/);
+    assert.ok(Array.isArray(round.out.failures) && round.out.failures.length > 0);
+    for (const f of round.out.failures) {
+      assert.ok(f.name && f.detail, 'each failure names the check and what is wrong');
+      assert.equal(typeof f.remedy, 'string');
+    }
+    assert.equal(run(['round', 'list']).out.length, 0, 'a refused round is not recorded');
+  }
+});
+
+test('doctor emits JSON with a check list and a host block', () => {
+  const r = run(['doctor']);
+  const report = r.out;
+  assert.equal(typeof report.ok, 'boolean');
+  assert.ok(Array.isArray(report.checks) && report.checks.length > 0);
+  for (const c of report.checks) {
+    assert.ok(c.name, 'every check is named');
+    assert.ok(['pass', 'fail', 'warn', 'skip'].includes(c.status), `bad status ${c.status}`);
+    assert.equal(typeof c.blocking, 'boolean');
+  }
+  assert.ok(report.host.platform && report.host.node && report.host.checkedAt);
+  assert.equal(typeof report.summary.blocking, 'number');
+  // Exit status must agree with the verdict, so `doctor && npm run apply` is safe.
+  assert.equal(r.ok, report.ok);
+  assert.equal(report.ok, report.summary.blocking === 0);
+  // Every blocking failure carries a remedy — bootstrap.sh prints these verbatim.
+  for (const b of report.blocking) assert.ok(b.remedy, `${b.name} has no remedy`);
+});
+
+test('doctor rejects an unknown persona instead of silently checking everything', () => {
+  const r = run(['doctor', '--persona', 'nope']);
+  assert.equal(r.ok, false);
+  assert.match(r.out.error, /unknown persona/);
 });
 
 test('sources list filters the local catalog', () => {

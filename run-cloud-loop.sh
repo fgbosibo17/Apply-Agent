@@ -1,42 +1,27 @@
 #!/usr/bin/env bash
-# Autonomous cloud apply loop: discover (Builtin) -> apply, repeat.
-# Stops when SESSION_TARGET cloud apps are logged, or after 2 consecutive
-# cycles add no new applications (fresh Builtin listings exhausted), or MAX_CYCLES.
-set +e
-cd "$(dirname "$0")"
-
-TARGET=${TARGET:-50}
-MAX_CYCLES=${MAX_CYCLES:-6}
-DRY_LIMIT=2
-
-count_cloud() { tail -n +2 applications-log.csv 2>/dev/null | grep -c '2026-06'; }
-wait_chrome_free() { while [ "$(tasklist //FI 'IMAGENAME eq chrome.exe' //NH 2>/dev/null | grep -ci chrome.exe)" -ne 0 ]; do sleep 2; done; }
-
-dry=0
-start=$(count_cloud)
-echo "=== CLOUD LOOP START — cloud apps so far: $start, target: $TARGET ==="
-
-for cycle in $(seq 1 $MAX_CYCLES); do
-  before=$(count_cloud)
-  echo ""
-  echo "########## CYCLE $cycle (cloud apps: $before/$TARGET) ##########"
-
-  echo "--- discover (Builtin) ---"
-  wait_chrome_free
-  PERSONA=cloud MAX_PER_BOARD=60 node src/discover-boards.js 2>&1 | grep -E "builtin\]|total new|Queue now|BLOCKED" || true
-
-  echo "--- apply ---"
-  wait_chrome_free
-  PERSONA=cloud SESSION_TARGET=$TARGET MAX_EVALUATED=200 node src/index.js 2>&1 | grep -E "✅ Applied|Session complete|Applied:|Skipped:|Errored:" || true
-
-  after=$(count_cloud)
-  echo "########## CYCLE $cycle DONE: $before -> $after cloud apps ##########"
-
-  if [ "$after" -ge "$TARGET" ]; then echo "=== TARGET REACHED ($after) ==="; break; fi
-  if [ "$after" -le "$before" ]; then dry=$((dry+1)); echo "(no new apps this cycle; dry=$dry/$DRY_LIMIT)"; else dry=0; fi
-  if [ "$dry" -ge "$DRY_LIMIT" ]; then echo "=== STOPPING: $DRY_LIMIT dry cycles (fresh Builtin listings exhausted) ==="; break; fi
-done
-
-echo ""
-echo "=== CLOUD LOOP END — cloud apps total: $(count_cloud) ==="
-tail -n +2 applications-log.csv | grep '2026-06' | awk -F',' '{print "  "$2" | "$3}'
+# Cloud apply loop — kept as an entry point, now a wrapper around the portable one.
+#
+# This script used to be Windows-Git-Bash-only and is now three lines of delegation.
+# What was wrong with it:
+#
+#   * wait_chrome_free() used `tasklist //FI 'IMAGENAME eq chrome.exe' //NH`, which
+#     exists only on Windows, and waited on ANY chrome.exe — with a browser open on
+#     the machine it never returned.
+#   * progress came from `grep -c '2026-06'` over applications-log.csv: a hardcoded
+#     month, long stale. Every application from June 2026 still matches, so the
+#     count now starts above any sane target and the loop exits having done nothing.
+#     It also read the legacy CSV rather than the ledger, and measured a lifetime
+#     total rather than this run's progress.
+#   * it called `node src/index.js` directly, so it had no watchdog for a hung
+#     batch and no fresh browser per batch.
+#
+# scripts/run-persona.sh fixes all three and works on macOS, Linux (headless
+# included, via xvfb-run) and Windows Git Bash. Per-cycle discovery is now handled
+# inside src/run-loop.js, which refreshes sources once through src/prerun.js before
+# the first browser starts.
+#
+# Prefer calling it directly:
+#   scripts/run-persona.sh primary 50 25
+set -u
+cd "$(dirname "$0")" || exit 1
+exec bash scripts/run-persona.sh primary "${TARGET:-50}" "${BATCH:-25}"
