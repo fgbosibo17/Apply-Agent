@@ -74,6 +74,20 @@ test('APPLY_AGENT_HOST_BROWSER_SLOTS=2 allows exactly two browser runs, and free
   assert.equal(c.slot, 1, 'the freed slot is reused');
 });
 
+test('APPLY_AGENT_LOCK_PID names a long-lived holder, so a just-opened round is live', () => {
+  const parent = process.ppid;   // alive for the whole test run
+  process.env.APPLY_AGENT_LOCK_PID = String(parent);
+  try {
+    const rec = locks.acquireHost({ roundId: 'rnd_env', persona: 'primary' });
+    assert.equal(rec.pid, parent);
+    assert.equal(locks.inspectHost().live, true);
+  } finally {
+    delete process.env.APPLY_AGENT_LOCK_PID;
+  }
+  locks.releaseHost({ roundId: 'rnd_env' });
+  assert.equal(locks.acquireHost({ roundId: 'rnd_plain' }).pid, process.pid, 'without it, the caller\'s own pid');
+});
+
 test('heartbeat and adopt find a round in any slot', () => {
   process.env.APPLY_AGENT_HOST_BROWSER_SLOTS = '2';
   config.reset();

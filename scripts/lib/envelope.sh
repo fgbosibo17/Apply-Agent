@@ -239,7 +239,10 @@ env_round_start() {
   local payload started
   payload="$(printf '{"persona":"%s","target":%s,"maxEvaluated":%s,"note":"%s"}' \
     "$ENV_PERSONA" "$ENV_MAX" "${ENV_MAX_EVAL:-45}" "${ENV_NOTE:-run}")"
-  if ! started="$(printf '%s' "$payload" | json_stdin $AGENT round start --stdin)"; then
+  # The guards record THIS shell as their holder (APPLY_AGENT_LOCK_PID): `round start`
+  # itself exits at once, and its pid would leave the round looking dead until the
+  # runner adopts the guards.
+  if ! started="$(printf '%s' "$payload" | APPLY_AGENT_LOCK_PID=$$ json_stdin $AGENT round start --stdin)"; then
     # Surface WHICH guard refused, so the caller knows whether to wait, run another
     # persona, or force.
     local guard holder age

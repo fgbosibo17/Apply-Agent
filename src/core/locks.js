@@ -48,6 +48,16 @@ const PROFILE = 'profile-lock';
 const SEMAPHORE = 'host-semaphore';
 
 const nowIso = () => new Date().toISOString();
+
+// The pid recorded as a guard's holder. `round start` runs in a process that exits
+// within a second, so its own pid would make a just-opened round look dead (and
+// reclaimable) until the runner adopts the guards. A long-lived caller — the run
+// envelope's shell — passes its pid in APPLY_AGENT_LOCK_PID so the round is live from
+// the moment it opens.
+const holderPid = () => {
+  const p = Number(process.env.APPLY_AGENT_LOCK_PID);
+  return Number.isInteger(p) && p > 0 ? p : process.pid;
+};
 const staleMinutes = () => Number(config().lockStaleMinutes);
 
 // A guard refused the run. `guard` is the whole point: the caller's response to
@@ -209,7 +219,7 @@ function acquireProfile({ profileKey, roundId = '', persona = '' } = {}) {
       roundId,
       machineId: machine.id(),
       hostname: machine.hostname(),
-      pid: process.pid,
+      pid: holderPid(),
       acquiredAt: nowIso(),
       heartbeatAt: nowIso(),
     },
@@ -243,7 +253,7 @@ function acquireHost({ roundId = '', persona = '', profileKey = '' } = {}) {
           slot,
           machineId: machine.id(),
           hostname: machine.hostname(),
-          pid: process.pid,
+          pid: holderPid(),
           roundId,
           persona,
           profileKey,
