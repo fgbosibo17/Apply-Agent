@@ -8,6 +8,8 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Newest first.
 
 ## [Unreleased]
+### Added
+- **LICENSE** (MIT), matching the `license` field package.json already declared.
 
 ## [0.1.5] - 2026-10-01
 _Run it all night on a Linux server: a scheduled orchestrator, parallel sessions,
