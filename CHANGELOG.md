@@ -8,7 +8,14 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Newest first.
 
 ## [Unreleased]
-### Fixed — found by an end-to-end server test (2026-10-01)
+
+## [0.1.5] - 2026-10-01
+_Run it all night on a Linux server: a scheduled orchestrator, parallel sessions,
+cross-machine locks, six more ATSs, opt-in resume tailoring, and a decision layer
+that settles duplicates, fit and autonomy. The README is now two guides — apply for
+yourself, or run nightly on a server._
+
+### Fixed — found by an end-to-end server test
 - **Run guards were never taken.** The run envelope fed every `--stdin` command an
   empty document (`< /dev/null` replaced the pipe), so rounds started with no persona:
   no profile lock, no host semaphore, and preflight checked every persona instead of
@@ -36,7 +43,7 @@ Newest first.
 - Runs commit run history only in a private repo marked `.private-data-repo`; elsewhere
   it stays in `.state/` and no git credentials are needed.
 
-### Added — overnight server runs, more ATSs, resume tailoring (2026-10-01)
+### Added — overnight server runs, more ATSs, resume tailoring
 - **Six more ATS handlers** — Workday, iCIMS, Jobvite, BambooHR, Breezy and
   Rippling, plus Workday discovery (`src/discover-workday.js`) over the tenants
   you list in `data/workday-boards.json`. Workday, iCIMS and Jobvite sign in or
@@ -74,7 +81,7 @@ Newest first.
   companies (`data/priority-companies.json`) and a per-ATS pause
   (`data/ats-hold.json`).
 
-### Changed — 2026-10-01
+### Changed
 - **One browser profile per ACCOUNT, not per persona**: `profileKey` in
   `src/personas.js` (the template's `adjacent` shares `primary`'s profile).
 - **EEO answers come only from the persona** (`src/util/eeo.js`). Gender, race,
@@ -86,7 +93,7 @@ Newest first.
 - Default posting recency window is 60 days; the default company reapply
   cooldown is "never" (9999 days, `APPLY_AGENT_COMPANY_REAPPLY_COOLDOWN_DAYS`).
 
-### Added
+### Added — decision layer, ledger and privacy audit
 - **Decision CLI (`node bin/apply-agent.js`)** — a dependency-free layer that owns
   every judgement that shouldn't be made from memory. Reads JSON on stdin, writes
   JSON on stdout, composes with Claude Code, a shell script, or the runner.
@@ -121,13 +128,14 @@ Newest first.
 - **Privacy audit** (`npm run privacy-audit`) — fails the build if a ledger,
   browser profile, resume, secret or real candidate PII reaches a tracked file.
   `--ref origin/main` audits what is actually published, not just the local tree.
-- **Test suite and CI** — 61 tests (`npm test`) across canonicalization, dedup,
-  gates, autonomy, queues, migration and the CLI; GitHub Actions runs them on
-  Node 20/22/24 plus a strict privacy audit.
-- **MIT LICENSE** and a portable, PII-free `SKILL.md` describing the workflow
-  contract independently of any one agent host.
+- **Test suite and CI** — `npm test` across canonicalization, dedup, gates,
+  autonomy, queues, migration, locks, preflight, tailoring, EEO and the CLI (390
+  tests in this release); GitHub Actions runs them on Node 20/22/24 plus a strict
+  privacy audit.
+- A portable, PII-free `SKILL.md` describing the workflow contract independently
+  of any one agent host.
 
-### Changed
+### Changed — runner
 - `src/index.js` now runs `ledger check` before every application and
   `ledger add` after every confirmed submission, and parks blockers in the
   attention queue rather than logging them as errors.
