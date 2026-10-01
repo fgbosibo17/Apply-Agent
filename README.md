@@ -61,7 +61,7 @@ You need **Node 20+** and **Google Chrome** (real Chrome, not Chromium — see [
 node setup-browser-login.js primary
 ```
 
-Opens a normal Chrome window on that persona's own profile folder. Sign in to Google and the job boards, then close it — the session is saved (and gitignored), so you only do this once.
+Opens a normal Chrome window on that persona's own profile folder (Windows, macOS or Linux desktop — it finds Chrome itself; set `CHROME_PATH` if it can't). Sign in to Google and the job boards, then close it — the session is saved (and gitignored), so you only do this once. On Windows, close your own Chrome first.
 
 ### 4. Apply
 
@@ -169,7 +169,7 @@ Put the agent on an always-on Linux box and let it apply overnight, every night,
 
 ### What you need
 
-- A **Linux server** (Ubuntu/Debian tested) — a cloud VM or a spare machine. Budget **~2 GB of RAM per browser** you run at once.
+- A **Linux server** (Ubuntu/Debian, x86-64 — Google Chrome has no Linux ARM build) — a cloud VM or a spare machine. Budget **~2 GB of RAM per browser** you run at once. Run the agent as a normal user, not root.
 - **Node 20+**, **Google Chrome** (`google-chrome-stable`), **xvfb** (a virtual screen) and **x11vnc** (to log in once).
 - **A private place for your profile.** Your filled-in `src/personas.js` and resumes contain your identity — never push them to a public fork. Either click **"Use this template" → Private** on GitHub, or copy those files to the server with `scp`.
 
@@ -196,15 +196,19 @@ bash scripts/bootstrap.sh
 
 ### 2. Log in once per profile, over VNC
 
-A server has no screen, so do the one-time login through VNC:
+A server has no screen, so do the one-time login through VNC. On the server:
 
 ```bash
-x11vnc -display :0 -localhost -nopw &                       # on the server
-ssh -L 5900:localhost:5900 you@server                       # on your laptop, then open a VNC viewer at localhost:5900
-xvfb-run -a google-chrome --user-data-dir=$HOME/job-agent/browser-profile-primary   # on the server
+bash scripts/login-profile.sh primary
 ```
 
-Sign in to Google (needed to read the email security codes some ATSs send) and LinkedIn, then close the window. Repeat for each profile (`browser-profile-secondary`, …).
+It starts a virtual screen with a VNC server on it (localhost only) and opens Chrome there on that persona's profile. Then on your laptop:
+
+```bash
+ssh -N -L 5900:localhost:5900 you@server     # leave this running
+```
+
+and open a VNC viewer at `localhost:5900` (macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`; Windows: TigerVNC or RealVNC). Sign in to Google first (needed to read the email security codes some ATSs send), then LinkedIn, and close Chrome — the script saves the login and exits. Repeat for each profile (`secondary`, …). `npm run doctor` confirms every profile is logged in.
 
 > **Never copy a browser profile from your laptop.** A profile carries the device fingerprint of the machine that made it; a copied one is exactly what CAPTCHA scoring flags. Each machine logs in once, itself. And never switch the browser to `headless` to "fix" a server problem — headless sessions get silently rejected. The scripts run real Chrome on the virtual screen for you (`scripts/with-display.sh`).
 
@@ -217,14 +221,23 @@ ls .state/runs/dryrun/                          # look at the screenshots
 
 The command prints one JSON summary (the digest) on stdout; the detail is in `.state/runs/logs/`. When the screenshots look right, add `--live`.
 
+The template ships with an **empty company list** (no one else's data). The first discovery fills it automatically from "Ask HN: Who is hiring?" — about 100 companies. For a much bigger pool, run this once (a few minutes):
+
+```bash
+npm run seed       # 6 months of Ask HN threads + 7 public remote job boards
+```
+
 ### 4. Schedule the night
 
-`crontab -e` on the server (times are UTC):
+`crontab -e` on the server (times are UTC). Cron starts jobs with a bare `PATH`, so give it the folder Node lives in — run `dirname $(which node)` and put that first:
 
 ```cron
+PATH=/home/you/.nvm/versions/node/v22.11.0/bin:/usr/local/bin:/usr/bin:/bin
 # every night at 01:00 UTC: all personas, real submissions, up to 50 each
 0 1 * * *  cd /home/you/job-agent && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
 ```
+
+(The scripts also look in the usual nvm/volta/`/usr/local` places if Node isn't on `PATH`, but the explicit line is what to rely on.)
 
 Tune it with environment variables in front of the command:
 
@@ -243,13 +256,13 @@ Tune it with environment variables in front of the command:
 **Parallel sessions** — one persona as several browsers at once, each with its own profile and queue, one shared ledger so no job is applied to twice. In `src/personas.js` set `PARALLEL_SESSIONS = { primary: 3 }`, log in once to `browser-profile-primary2` and `-primary3` (step 2), then let the watchdog keep them running all day:
 
 ```cron
-*/5 * * * *  cd /home/you/job-agent && bash scripts/watchdog-sessions.sh primary 3
+*/5 * * * *  cd /home/you/job-agent && bash scripts/watchdog-sessions.sh primary 3 --live
 ```
 
 **A one-off push** — get one persona to a number right now, outside the night:
 
 ```bash
-scripts/persona-push.sh primary 75      # stops after two rounds in a row with no gain
+scripts/persona-push.sh primary 75      # stops after two rounds in a row with no gain (--dry-run to rehearse)
 ```
 
 ### 6. Morning summary and alerts (optional)
@@ -459,6 +472,7 @@ scripts/
   parallel-session.sh one persona as N browsers; watchdog-sessions.sh keeps them up
   persona-push.sh     get one persona to a number now
   bootstrap.sh        set up a new machine, then `npm run doctor`
+  login-profile.sh    log a persona in once on a headless server, over VNC
   notify-telegram.py, gmail-session-check.py   optional alerts
 data/companies.json   public ATS company tokens (the discovery seed) — shareable, no personal data
 CLAUDE.md             instructions + setup wizard for Claude Code

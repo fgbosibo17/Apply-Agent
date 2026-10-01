@@ -481,8 +481,8 @@ function checkProfiles(io, only) {
     seenDirs.set(dir, key);
     const listing = io.exists(dir) ? io.readdir(dir) : null;
     const loginRemedy = io.platform === 'linux'
-      ? `Nobody has logged in as ${key} on this machine yet. Log in ONCE locally over x11vnc: xvfb-run -a google-chrome --user-data-dir=${dir}, sign in to LinkedIn/Google, close it. Never copy a profile from another machine — the fingerprint mismatch is what CAPTCHA scoring looks for.`
-      : `Nobody has logged in as ${key} on this machine yet. Log in ONCE: google-chrome --user-data-dir=${dir}, sign in to LinkedIn/Google, close it. Never copy a profile between machines.`;
+      ? `Nobody has logged in as ${key} on this machine yet. Log in ONCE, locally, over x11vnc: bash scripts/login-profile.sh ${key} (it prints the ssh tunnel and VNC steps), sign in to Google/LinkedIn, close Chrome. Never copy a profile from another machine — the fingerprint mismatch is what CAPTCHA scoring looks for.`
+      : `Nobody has logged in as ${key} on this machine yet. Log in ONCE: node setup-browser-login.js ${key}, sign in to Google/LinkedIn, close Chrome. Never copy a profile between machines.`;
 
     if (listing === null) {
       out.push(mk(`profile:${key}`, true, 'fail', `browser profile directory is absent: ${dir}`, loginRemedy,
@@ -798,7 +798,7 @@ module.exports = {
   endpointChecks,
   MIN_NODE_MAJOR,
   // Exported for focused testing and reuse.
-  checkNode, checkNpmCi, checkPlaywright, checkChrome, checkXvfb,
+  checkNode, checkNpmCi, checkPlaywright, checkChrome, checkXvfb, CHROME_CANDIDATES,
   checkSecretStore, checkS3, checkResumes, checkProfiles, checkProfileIdentities,
   checkSchema, checkProfileDirs, checkDisk, checkLedger,
   defaultIo,

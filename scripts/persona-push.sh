@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# scripts/persona-push.sh <persona> <target> [max_rounds]
+# scripts/persona-push.sh <persona> <target> [max_rounds] [--dry-run]
 #
 # Run ONE persona on its own until it has <target> new submissions (counted from
 # when this push started), outside the nightly orchestrator — for "get this persona
 # to 75 today" without waiting for the night.
 #
 #   scripts/persona-push.sh primary 75
+#   scripts/persona-push.sh primary 3 1 --dry-run     # rehearse: fill + screenshot, submit nothing
+#
+# A push is a deliberate human command, so it submits unless --dry-run is given.
 #
 # - lock per persona, so two pushes for the same persona can't overlap
 # - waits (doesn't count a round) while an orchestrator round for the same
@@ -15,7 +18,11 @@
 # - Linux: uses flock and GNU timeout
 set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
-P="${1:?persona}"; TARGET="${2:?target}"; MAX_ROUNDS="${3:-12}"
+# Cron has a minimal PATH; find node the way an interactive shell would.
+. scripts/lib/ensure-node.sh
+MODE="--live"; ARGS=()
+for a in "$@"; do [ "$a" = "--dry-run" ] && MODE="--dry-run" || ARGS+=("$a"); done
+P="${ARGS[0]:?persona}"; TARGET="${ARGS[1]:?target}"; MAX_ROUNDS="${ARGS[2]:-12}"
 LOG_DIR=".state/runs/logs"; mkdir -p "$LOG_DIR"
 exec 8>".state/push-$P.lock"
 flock -n 8 || { echo "push for $P already running"; exit 0; }
@@ -42,6 +49,7 @@ PY
 }
 
 PERSONA="$P" node src/core/browser-hygiene.js >> "$PLOG-discover.log" 2>&1 8>&- || true
+node src/discover-hn.js --if-empty >> "$PLOG-discover.log" 2>&1 8>&- || true   # fresh install: seed once
 ( PERSONA="$P" TOKEN_CAP=500 timeout 120 node src/discover-api.js
   PERSONA="$P" timeout 90 node src/discover-community.js
   PERSONA="$P" timeout 90 node src/discover-aggregators.js ) >> "$PLOG-discover.log" 2>&1 8>&- || true
@@ -59,7 +67,7 @@ while [ "$ROUND" -lt "$MAX_ROUNDS" ]; do
   EVAL=$((NEED * 6 + 60)); [ "$EVAL" -gt 200 ] && EVAL=200
   echo "--- [$P] push round $ROUND - $CUR/$TARGET, need $NEED (eval cap $EVAL) ---" >&2
   DIGEST_FILE="${PLOG}-round${ROUND}.json"
-  bash scripts/nightly-run.sh "$P" --live --max "$NEED" --max-eval "$EVAL" \
+  bash scripts/nightly-run.sh "$P" "$MODE" --max "$NEED" --max-eval "$EVAL" \
     > "$DIGEST_FILE" 2>>"${PLOG}-round${ROUND}.err" 8>&-
   STATUS=$?
   AFTER=$(count)
@@ -70,7 +78,7 @@ while [ "$ROUND" -lt "$MAX_ROUNDS" ]; do
 done
 
 FINAL=$(count)
-printf '{"ranAt":"%s","mode":"--live","results":[{"persona":"%s","exitCode":%s,"durationSec":%s,"applied":%s,"target":%s,"rounds":%s,"digestFile":"%s"}]}\n' \
+printf '{"ranAt":"%s","mode":"'"$MODE"'","results":[{"persona":"%s","exitCode":%s,"durationSec":%s,"applied":%s,"target":%s,"rounds":%s,"digestFile":"%s"}]}\n' \
   "$STAMP" "$P" "$STATUS" "$(( $(date +%s) - T0 ))" "$FINAL" "$TARGET" "$ROUND" "$DIGEST_FILE" > "$SUMMARY"
 python3 scripts/notify-telegram.py "$SUMMARY" 2>>"$LOG_DIR/notify-$STAMP.err" 8>&- || true
 echo "=== persona-push done: $P $FINAL/$TARGET ===" >&2

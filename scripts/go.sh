@@ -19,6 +19,8 @@
 # stdout is still one digest JSON document. Read the progress on stderr.
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
+# Cron has a minimal PATH; find node the way an interactive shell would.
+. scripts/lib/ensure-node.sh
 # shellcheck source=scripts/lib/envelope.sh
 . scripts/lib/envelope.sh
 

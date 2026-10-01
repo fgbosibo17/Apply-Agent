@@ -26,6 +26,8 @@
 #     so a run that crosses midnight doesn't reset its own progress
 set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
+# Cron has a minimal PATH; find node the way an interactive shell would.
+. scripts/lib/ensure-node.sh
 
 TARGET="${TARGET:-50}"
 MAX_ROUNDS="${MAX_ROUNDS:-8}"
@@ -130,6 +132,9 @@ run_discovery() {
   local persona="$1"
   local dlog="$LOG_DIR/orchestrator-$STAMP-${persona}-discover.log"
   echo "  [discovery] starting parallel discovery for $persona..." >&2
+  # A fresh install has an empty company list; seed it to completion before the
+  # time-capped sweep below (a no-op once seeded).
+  node src/discover-hn.js --if-empty >> "$dlog" 2>&1 9>&- || true
   # Browser hygiene before anything opens Chrome. Bot-scoring cookies re-accumulate
   # within hours, so this is the periodic guarantee that a profile never drifts far.
   # (no --profile: it resolves the persona's own dir, honouring a shared profileKey)

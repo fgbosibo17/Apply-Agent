@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# scripts/parallel-session.sh <persona> <n> [sessions]
+# scripts/parallel-session.sh <persona> <n> [sessions] [--live]
 #
 # Run session <n> of a persona continuously, as one of several in parallel — or,
 # with one session, an all-day loop for a single persona (discover → apply → repeat):
 #
-#   scripts/parallel-session.sh primary 1 1     # one persona, all day, until killed
+#   scripts/parallel-session.sh primary 1 1 --live   # one persona, all day, until killed
 #
-#   scripts/parallel-session.sh primary 1 3     # session 1 → persona "primary"
-#   scripts/parallel-session.sh primary 2 3     # session 2 → persona "primary2"
-#   scripts/parallel-session.sh primary 3 3     # session 3 → persona "primary3"
-#   scripts/watchdog-sessions.sh primary 3      # (re)start any that died — cron it
+# DRY RUN UNLESS --live, like every other scheduled path: without it each round
+# fills and screenshots forms and submits nothing.
+#
+#   scripts/parallel-session.sh primary 1 3 --live   # session 1 → persona "primary"
+#   scripts/parallel-session.sh primary 2 3 --live   # session 2 → persona "primary2"
+#   scripts/parallel-session.sh primary 3 3 --live   # session 3 → persona "primary3"
+#   scripts/watchdog-sessions.sh primary 3 --live    # (re)start any that died — cron it
 #
 # Enable the clones first with PARALLEL_SESSIONS in src/personas.js
 # (e.g. `primary: 3`) and log each extra profile in once:
@@ -27,13 +30,25 @@
 # Pacing is env-tunable (APPLY_GAP_MS etc., see src/index.js). Linux/headless: the
 # browser runs under scripts/with-display.sh.
 set -u
-BASE="${1:?usage: parallel-session.sh <persona> <n> [sessions]}"
-N="${2:-1}"
-SESSIONS="${3:-$N}"
+MODE=(--dry-run)
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --live)    MODE=(--live) ;;
+    --dry-run) MODE=(--dry-run) ;;
+    *)         ARGS+=("$a") ;;
+  esac
+done
+BASE="${ARGS[0]:-}"
+[ -n "$BASE" ] || { echo "usage: parallel-session.sh <persona> <n> [sessions] [--live]" >&2; exit 2; }
+N="${ARGS[1]:-1}"
+SESSIONS="${ARGS[2]:-$N}"
 PERSONA="$BASE"
 [ "$N" != "1" ] && PERSONA="${BASE}${N}"
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
+# Cron has a minimal PATH; find node the way an interactive shell would.
+. scripts/lib/ensure-node.sh
 LOG_DIR=".state/runs/logs"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/session-${PERSONA}.log"
 
@@ -44,7 +59,7 @@ if ! node -e "process.exit(require('./src/personas').personas['$PERSONA'] ? 0 : 
   exit 2
 fi
 
-log "=== session $N/$SESSIONS started (queue-${PERSONA}.json) ==="
+log "=== session $N/$SESSIONS started (queue-${PERSONA}.json, ${MODE[0]}) ==="
 ROUND=0
 while true; do
   ROUND=$((ROUND + 1))
@@ -68,6 +83,7 @@ while true; do
 
   if [ "$N" = "1" ]; then
     log "discovery (session 1 only)..."
+    node src/discover-hn.js --if-empty >> "$LOG" 2>&1 || true   # fresh install: seed once
     # Four sources at once, capped at DISCOVERY_SEC (default 90s) so a slow board
     # never holds up applying. discover-ats.js takes QUERIES from the env, else the
     # persona's targetRoles.
@@ -93,7 +109,7 @@ while true; do
   log "applying..."
   APPLY_GAP_MS="${APPLY_GAP_MS:-2000}" APPLY_JITTER_MS="${APPLY_JITTER_MS:-2000}" \
   APPLY_BREATHER_EVERY="${APPLY_BREATHER_EVERY:-30}" APPLY_BREATHER_MS="${APPLY_BREATHER_MS:-10000}" \
-    bash scripts/with-display.sh bash scripts/nightly-run.sh "$PERSONA" --live \
+    bash scripts/with-display.sh bash scripts/nightly-run.sh "$PERSONA" "${MODE[@]}" \
       --max "${SESSION_MAX:-100}" --max-eval "${SESSION_MAX_EVAL:-300}" >> "$LOG" 2>&1 || true
 
   log "round $ROUND done"

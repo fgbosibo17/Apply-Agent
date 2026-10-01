@@ -8,6 +8,8 @@
 //
 //   node src/discover-hn.js            # last 3 monthly threads
 //   node src/discover-hn.js --months 6
+//   node src/discover-hn.js --if-empty # only when data/companies.json has no tokens yet
+//                                      # (first run on a fresh install; a no-op after)
 //
 // This is a genuine additional discovery method on top of the seeded big-company
 // list, and it compounds: every month adds fresh small companies.
@@ -17,8 +19,11 @@ const fs = require('fs');
 const { fetchJson, extractAtsTokens, ATS_LIST } = require('./ats-apis');
 
 const COMPANIES_FILE = path.resolve(__dirname, '..', 'data', 'companies.json');
-const MONTHS = parseInt((process.argv.find((a) => a.startsWith('--months='))?.split('=')[1]) ||
-  (process.argv[process.argv.indexOf('--months') + 1]) || '3', 10);
+// `--months 6` or `--months=6`; default 3. (Without the flag, indexOf() is -1 and the
+// old lookup read argv[0] — the node binary path — which parsed to NaN and harvested nothing.)
+const MONTHS_ARG = process.argv.find((a) => a.startsWith('--months='))?.split('=')[1]
+  || (process.argv.includes('--months') ? process.argv[process.argv.indexOf('--months') + 1] : undefined);
+const MONTHS = parseInt(MONTHS_ARG || '3', 10) || 3;
 
 async function hn(url) {
   const { json } = await fetchJson(`https://hn.algolia.com${url}`);
@@ -26,6 +31,11 @@ async function hn(url) {
 }
 
 async function main() {
+  if (process.argv.includes('--if-empty')) {
+    const c = JSON.parse(fs.readFileSync(COMPANIES_FILE, 'utf8'));
+    const n = ATS_LIST.reduce((sum, a) => sum + (Array.isArray(c[a]) ? c[a].length : 0), 0);
+    if (n > 0) { console.log(`company list already seeded (${n} tokens) — nothing to do`); return; }
+  }
   console.log(`\nHN Who-is-Hiring harvest — last ${MONTHS} monthly thread(s)\n`);
   const search = await hn('/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=12');
   const stories = (search && search.hits || []).filter((h) => /who is hiring/i.test(h.title)).slice(0, MONTHS);

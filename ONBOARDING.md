@@ -284,16 +284,21 @@ Every failure prints what to do about it. Re-check any time with `npm run doctor
 
 ### 2. One browser login per machine, over VNC
 
-On a headless server there is no screen to log in on, so do it once through VNC:
+On a headless server there is no screen to log in on, so do it once through VNC. The
+script starts one virtual screen (Xvfb) with an x11vnc server on it, bound to localhost,
+and opens Chrome there on the persona's own profile directory:
 
 ```bash
-x11vnc -display :0 -localhost -nopw &        # on the server
-ssh -L 5900:localhost:5900 you@server        # from the laptop, then connect a VNC client
-xvfb-run -a google-chrome --user-data-dir=/path/to/repo/browser-profile-secondary
+bash scripts/login-profile.sh primary          # on the server
+ssh -N -L 5900:localhost:5900 you@server        # on the laptop, then connect a VNC viewer to localhost:5900
 ```
 
-Sign in to LinkedIn and Google in that window, then close it. Repeat for each profile you
-intend to run there (`browser-profile-secondary`, `browser-profile-primary`).
+Sign in to Google and LinkedIn in that window, then close Chrome; the script exits and the
+login is saved. Repeat for each profile you intend to run there (`secondary`, …).
+
+(Doing it by hand with `xvfb-run -a` and `x11vnc -display :0` usually shows a black
+screen: `xvfb-run -a` picks its own display number, so the VNC server is looking at a
+different screen than Chrome.)
 
 An **empty or missing** `browser-profile-*` directory is the most common new-machine
 failure, and doctor calls it out explicitly: *"Nobody has logged in as `<persona>` on this
@@ -444,7 +449,7 @@ them alive. Session 1 alone discovers, then `scripts/redistribute-queues.py` dea
 results out across every session's queue.
 
 ```bash
-scripts/watchdog-sessions.sh primary 3  # starts any of sessions 1-3 that is not running
+scripts/watchdog-sessions.sh primary 3 --live  # starts any of sessions 1-3 that is not running
 ```
 
 Mind the host: each session is a full Chrome. Size the count to the box's RAM.
@@ -464,13 +469,15 @@ TELEGRAM_CHAT_ID=123456789
 `NOTIFY_TZ=America/New_York` shows times in your zone. Without credentials both
 scripts print instead of sending.
 
-**A crontab that ties it together** (`crontab -e` on the server; times are UTC):
+**A crontab that ties it together** (`crontab -e` on the server; times are UTC). Cron's
+`PATH` is bare, so put Node's folder (`dirname $(which node)`) first:
 
 ```cron
+PATH=/home/you/.nvm/versions/node/v22.11.0/bin:/usr/local/bin:/usr/bin:/bin
 # nightly run at 01:00 UTC, all personas, real submissions
 0 1 * * *    cd /home/you/Apply-Agent && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
 # or: keep 3 parallel sessions of one persona alive all day
-*/5 * * * *  cd /home/you/Apply-Agent && bash scripts/watchdog-sessions.sh primary 3
+*/5 * * * *  cd /home/you/Apply-Agent && bash scripts/watchdog-sessions.sh primary 3 --live
 ```
 
 Check progress from anywhere with `npm run agent -- digest --round <id>`, and stop a

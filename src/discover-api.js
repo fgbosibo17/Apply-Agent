@@ -83,7 +83,22 @@ async function main() {
     console.error(`Missing ${COMPANIES_FILE}`);
     process.exit(1);
   }
-  const companies = JSON.parse(fs.readFileSync(COMPANIES_FILE, 'utf8'));
+  let companies = JSON.parse(fs.readFileSync(COMPANIES_FILE, 'utf8'));
+  // A fresh install ships an EMPTY token pool by design (no company data in the
+  // template), which would make a first run sweep nothing and queue nothing. Seed it
+  // once from "Ask HN: Who is hiring?" (src/discover-hn.js). Fires only when every
+  // ATS list is empty, so a populated install never pays for it. NO_AUTO_SEED=1 skips.
+  const tokenCount = (c) => ATS_LIST.reduce((n, a) => n + (Array.isArray(c[a]) ? c[a].length : 0), 0);
+  if (tokenCount(companies) === 0 && !/^(1|true|yes)$/i.test(process.env.NO_AUTO_SEED || '')) {
+    console.log('\nThe company list (data/companies.json) is empty — seeding it once from "Ask HN: Who is hiring?"...');
+    const seed = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'discover-hn.js')], {
+      stdio: 'inherit', timeout: parseInt(process.env.AUTO_SEED_TIMEOUT_MS || '300000', 10),
+    });
+    companies = JSON.parse(fs.readFileSync(COMPANIES_FILE, 'utf8'));
+    console.log(seed.status === 0 && tokenCount(companies) > 0
+      ? `Seeded ${tokenCount(companies)} company tokens.\n`
+      : 'Seeding did not add tokens (network?) — run `npm run seed` by hand. Continuing with an empty list.\n');
+  }
   const persona = answers; // active persona answers object
   const seen = loadSeenUrls();
   const existing = loadQueue();

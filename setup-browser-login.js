@@ -10,18 +10,37 @@
 // for discovery, or "Sign in with Google" on an ATS. Applications themselves
 // (Greenhouse/Lever/Ashby/Workable) don't require login.
 //
-// IMPORTANT: your personal Chrome must be CLOSED first. A normal Chrome launch only
-// stays in its own isolated profile if no other Chrome instance is running; otherwise
-// Windows hands the tabs to your existing Chrome (the profile-picker you saw earlier).
-// This script refuses to launch while Chrome is running, to prevent that.
+// Works on Windows, macOS and Linux with a screen. On a headless Linux SERVER use
+// `bash scripts/login-profile.sh <persona>` instead — it logs in over VNC.
+//
+// IMPORTANT (Windows): your personal Chrome must be CLOSED first. A normal Chrome
+// launch only stays in its own isolated profile if no other Chrome instance is
+// running; otherwise Windows hands the tabs to your existing Chrome. This script
+// refuses to launch on Windows while Chrome is running, to prevent that.
 
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { personas } = require('./src/personas');
 
-// Chrome path — edit if Chrome is installed elsewhere (or on macOS/Linux).
-const CHROME = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+// Real Chrome for this platform — the same places doctor and Playwright's 'chrome'
+// channel look. CHROME_PATH (or APPLY_AGENT_CHROME_PATH) overrides.
+const { CHROME_CANDIDATES } = require('./src/core/preflight');
+function findChrome() {
+  const override = process.env.CHROME_PATH || process.env.APPLY_AGENT_CHROME_PATH;
+  if (override) return override;
+  const candidates = [...(CHROME_CANDIDATES[process.platform] || [])];
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    candidates.push(path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  }
+  if (process.platform === 'linux') {
+    for (const bin of ['google-chrome', 'google-chrome-stable']) {
+      try { candidates.push(execSync(`command -v ${bin}`, { encoding: 'utf8', shell: '/bin/sh' }).trim()); } catch { /* not on PATH */ }
+    }
+  }
+  return candidates.find((c) => c && fs.existsSync(c)) || candidates[0] || 'google-chrome';
+}
+const CHROME = findChrome();
 
 // Profiles are derived from personas.js — one isolated browser profile per persona.
 const PROFILES = {};
@@ -50,17 +69,27 @@ if (!profile) {
   process.exit(1);
 }
 
-if (!fs.existsSync(CHROME)) {
-  console.error(`Chrome not found at ${CHROME} — set CHROME_PATH env or edit this script.`);
+if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+  console.error('\n  No screen here (DISPLAY is unset) — this looks like a headless server.');
+  console.error(`  Log in over VNC instead:  bash scripts/login-profile.sh ${who}\n`);
   process.exit(1);
 }
 
-// Guard: refuse to launch while any Chrome is running (would absorb the tabs).
+if (!fs.existsSync(CHROME)) {
+  console.error(`Chrome not found at ${CHROME} — install Google Chrome, or set CHROME_PATH to its executable.`);
+  process.exit(1);
+}
+
+// Guard (Windows): refuse to launch while any Chrome is running (would absorb the
+// tabs). On macOS and Linux, launching the binary with its own --user-data-dir
+// starts a separate instance, so a running Chrome is not a problem there.
 let chromeRunning = false;
-try {
-  const out = execSync('tasklist /FI "IMAGENAME eq chrome.exe" /NH', { encoding: 'utf8' });
-  chromeRunning = /chrome\.exe/i.test(out);
-} catch { /* tasklist failed (non-Windows?) — proceed anyway */ }
+if (process.platform === 'win32') {
+  try {
+    const out = execSync('tasklist /FI "IMAGENAME eq chrome.exe" /NH', { encoding: 'utf8' });
+    chromeRunning = /chrome\.exe/i.test(out);
+  } catch { /* tasklist failed — proceed anyway */ }
+}
 
 if (chromeRunning) {
   console.error('\n  ⛔ Chrome is currently running.');
@@ -81,10 +110,16 @@ console.log('  → Tab 1 is Google — sign in there first.');
 console.log('  → Then each job board: use "Sign in with Google" OR email/password.');
 console.log('  → CLOSE the window when every tab is logged in. Session saves automatically.\n');
 
+// --password-store=basic and --use-mock-keychain are what Playwright passes when the
+// runner launches this profile. Chrome picks its cookie-encryption key from those
+// flags (macOS Keychain / Linux keyring otherwise), so a login made WITHOUT them is a
+// session the runner cannot decrypt — it would look logged out. Windows ignores both.
 const args = [
   `--user-data-dir=${userDataDir}`,
   '--no-first-run',
   '--no-default-browser-check',
+  '--password-store=basic',
+  '--use-mock-keychain',
   ...LOGIN_PAGES,
 ];
 
