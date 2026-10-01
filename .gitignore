@@ -120,3 +120,7 @@ dryrun-*.txt
 # application history — never commit.
 .state/
 data/agent-config.json
+
+# Core dumps from a crashed browser (e.g. Chrome in a container without its sandbox)
+/core
+/core.[0-9]*

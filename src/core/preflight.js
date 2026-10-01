@@ -451,10 +451,38 @@ function endpointChecks(io, probes) {
 // on macOS and replayed on Ubuntu is exactly the mismatch CAPTCHA scoring looks for.
 // Each machine logs in once, locally, and keeps its own. That is also why round start
 // checks resumes for every persona but profiles only for the persona it is running.
-function checkResumes(io, only) {
+// A persona still holding template placeholders (`<Your_Resume.pdf>`, `<you@example.com>`)
+// has not been set up, so it is not a failure to report as one: the template ships
+// three example personas and most people use one. It is reported as a warning — fill
+// it in or delete it — and it never blocks a round for a persona that IS set up.
+const PLACEHOLDER = /<[^>]+>/;
+const unconfigured = (p) => PLACEHOLDER.test(String(p.resumePath || '')) || PLACEHOLDER.test(String(p.email || ''));
+
+// `active` is the persona a round is about to run as: it must be set up, whatever the
+// others are. With no active persona (plain doctor), at least one must be set up.
+function checkResumes(io, only, active) {
   const out = [];
-  for (const [key, p] of Object.entries(io.personas)) {
+  const entries = Object.entries(io.personas);
+  const runAs = active || only;
+  if (runAs && io.personas[runAs] && unconfigured(io.personas[runAs])) {
+    out.push(mk(`persona:${runAs}`, true, 'fail',
+      `persona "${runAs}" is not set up — src/personas.js still has template placeholders for it`,
+      'Fill in its name, email, phone, resumePath and answers in src/personas.js (or say `setup` in Claude Code). Never run a placeholder persona.',
+      { persona: runAs, reason: 'unconfigured' }));
+  } else if (!runAs && entries.length && entries.every(([, p]) => unconfigured(p))) {
+    out.push(mk('persona:any', true, 'fail', 'no persona is set up yet — src/personas.js is still the template',
+      'Fill in at least one persona in src/personas.js (or say `setup` in Claude Code), then delete the examples you do not need.',
+      { reason: 'unconfigured' }));
+  }
+  for (const [key, p] of entries) {
     if (only && key !== only) continue;
+    if (unconfigured(p)) {
+      out.push(mk(`resume:${key}`, false, 'warn',
+        `persona "${key}" is not set up yet (it still has template placeholders)`,
+        `Fill it in in src/personas.js, or delete it if you don't need it — routing walks whatever personas remain.`,
+        { persona: key, path: p.resumePath, reason: 'unconfigured' }));
+      continue;
+    }
     const v = io.verifyResume(p.resumePath);
     out.push(v.ok
       ? mk(`resume:${key}`, true, 'pass', `${path.basename(p.resumePath)} is a valid PDF (${v.bytes} bytes)`, '',
@@ -476,6 +504,7 @@ function checkProfiles(io, only) {
   const seenDirs = new Map();      // dir -> the persona key already reported for it
   for (const [key, p] of Object.entries(io.personas)) {
     if (only && key !== only) continue;
+    if (unconfigured(p)) continue;   // reported once, by checkResumes
     const dir = p.browserProfile;
     if (seenDirs.has(dir)) continue;
     seenDirs.set(dir, key);
@@ -690,7 +719,7 @@ function collect(opts = {}) {
     checkXvfb(io),
     checkSecretStore(io),
     checkS3(io),
-    ...checkResumes(io, resumeOnly),
+    ...checkResumes(io, resumeOnly, opts.profilePersona || opts.persona || null),
     ...checkProfiles(io, profileOnly),
     checkProfileIdentities(io),
     ...endpointChecks(io, opts.probes),

@@ -97,7 +97,7 @@ function start(input = {}, opts = {}) {
     save(db);
     // Stamp the round id into the guards now that it exists, so a later refusal can
     // name the round that is holding them.
-    if (held) stampRound(profileKey, round.id);
+    if (held) stampRound(profileKey, round.id, held.host && held.host.slot);
     return round;
   } catch (e) {
     // Never leave a guard held for a round that failed to record.
@@ -108,8 +108,8 @@ function start(input = {}, opts = {}) {
 
 // Write the round id into both guard files. Separate from acquire because the round
 // id does not exist until the record is written.
-function stampRound(profileKey, roundId) {
-  for (const file of [locks.profileLockPath(profileKey), locks.semaphorePath()]) {
+function stampRound(profileKey, roundId, hostSlot = 1) {
+  for (const file of [locks.profileLockPath(profileKey), locks.semaphorePath(undefined, hostSlot || 1)]) {
     try {
       const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (rec.machineId !== machine.id()) continue;

@@ -70,6 +70,30 @@ json() {
   fi
 }
 
+# The same two, for commands that READ a payload piped into them (`--stdin`).
+#
+# logged/json above take stdin from /dev/null so a command can never sit waiting on a
+# terminal — but that redirect also REPLACES a pipe. `printf payload | json cmd --stdin`
+# therefore handed every --stdin command an empty document: rounds started with no
+# persona, so the profile lock and host semaphore were never taken and preflight was
+# never scoped. These leave stdin alone; use them only where a payload is piped in.
+logged_stdin() {
+  local label="$1"; shift
+  if [ -n "$ENV_LOG" ]; then
+    printf '\n===== %s : %s =====\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$label" >> "$ENV_LOG"
+    "$@" >> "$ENV_LOG" 2>&1
+  else
+    "$@" > /dev/null 2>&1
+  fi
+}
+json_stdin() {
+  if [ -n "$ENV_LOG" ]; then
+    "$@" 2>> "$ENV_LOG"
+  else
+    "$@" 2>/dev/null
+  fi
+}
+
 # Read one field out of a JSON document on stdin, without requiring jq.
 json_field() {
   node -e "
@@ -107,7 +131,7 @@ finish() {
   if [ -n "$ENV_ROUND_ID" ]; then
     if [ "$ENV_FAILED" = "1" ] || [ "$code" != "0" ]; then
       printf '{"id":"%s","note":"%s"}' "$ENV_ROUND_ID" "aborted at ${ENV_STAGE}" \
-        | logged "round complete (aborted)" $AGENT round complete --stdin || true
+        | logged_stdin "round complete (aborted)" $AGENT round complete --stdin || true
     fi
     # Belt and braces: if the round record could not be closed, break the guards anyway.
     local held
@@ -215,7 +239,7 @@ env_round_start() {
   local payload started
   payload="$(printf '{"persona":"%s","target":%s,"maxEvaluated":%s,"note":"%s"}' \
     "$ENV_PERSONA" "$ENV_MAX" "${ENV_MAX_EVAL:-45}" "${ENV_NOTE:-run}")"
-  if ! started="$(printf '%s' "$payload" | json $AGENT round start --stdin)"; then
+  if ! started="$(printf '%s' "$payload" | json_stdin $AGENT round start --stdin)"; then
     # Surface WHICH guard refused, so the caller knows whether to wait, run another
     # persona, or force.
     local guard holder age
@@ -248,13 +272,17 @@ env_round_start() {
 # 5. discovery. Never fatal: a run with a queue already on disk is still a useful run,
 #    and a discovery outage must not cost the night.
 env_discovery() {
+  if [ "${ENV_DISCOVER:-1}" = "0" ]; then
+    step discovery "skipped (--no-discover: the caller discovers for this queue)"
+    return 0
+  fi
   step discovery "refresh the queue"
   if logged "discovery" env PERSONA="$ENV_PERSONA" $AGENT_DISCOVER; then
     say "    done"
   else
     say "    discovery failed — continuing with the queue already on disk"
     printf '{"area":"discovery","reproducible":false,"summary":"discovery failed during a scheduled run","signature":"discovery-failed"}' \
-      | logged "friction" $AGENT friction record --stdin || true
+      | logged_stdin "friction" $AGENT friction record --stdin || true
   fi
 }
 
@@ -295,7 +323,7 @@ env_apply() {
 env_round_complete() {
   step round-complete "close the round"
   printf '{"id":"%s","note":"%s"}' "$ENV_ROUND_ID" "${ENV_NOTE:-run} complete" \
-    | logged "round complete" $AGENT round complete --stdin || say "    (already closed)"
+    | logged_stdin "round complete" $AGENT round complete --stdin || say "    (already closed)"
 }
 
 # 9. commit and push the tracked run output. Privacy audit first, always: it is the gate
@@ -303,6 +331,14 @@ env_round_complete() {
 env_commit_push() {
   step commit "tracked run output"
   if [ ! -d .git ]; then say "    not a git checkout — skipping"; return 0; fi
+  # Only a repo that has opted in to holding run data commits it: the marker file
+  # .private-data-repo (in a PRIVATE repo — it also relaxes the privacy audit there).
+  # Everywhere else, including any copy of the public template, run history stays in
+  # .state/ and nothing is committed or pushed, so no git credentials are needed.
+  if [ ! -f .private-data-repo ]; then
+    say "    skipped — run history stays in .state/ (add .private-data-repo to a PRIVATE repo to commit it)"
+    return 0
+  fi
   if ! logged "privacy audit" npm run privacy-audit:strict; then
     say "    PRIVACY AUDIT FAILED — nothing committed. Run: npm run privacy-audit"
     return 0
@@ -329,8 +365,6 @@ env_commit_push() {
 env_gc() {
   step gc "retention"
   logged "gc" $AGENT gc || true
-  local orphans
-  orphans="$(json $AGENT profiles list | json_field 2>/dev/null || true)"
   local n
   n="$(json $AGENT profiles list | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(JSON.parse(s).totals.unknownCount))}catch{process.stdout.write('0')}})" 2>/dev/null)"
   if [ -n "$n" ] && [ "$n" != "0" ]; then
@@ -346,7 +380,7 @@ env_state_push() {
   if ! pushed="$(json $AGENT state push)"; then
     say "    state push FAILED — this machine's state is not shared yet"
     printf '{"area":"state-sync","reproducible":false,"summary":"state push failed","signature":"state-push-failed"}' \
-      | logged "friction" $AGENT friction record --stdin || true
+      | logged_stdin "friction" $AGENT friction record --stdin || true
     return 0
   fi
   skipped="$(printf '%s' "$pushed" | json_field skipped)"

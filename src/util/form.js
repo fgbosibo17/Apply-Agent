@@ -252,7 +252,10 @@ async function proofread(scope) {
 function dryRunShotPath(company) {
   const paths = require('../core/paths');
   const safe = String(company || 'ats').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').slice(0, 60);
-  return require('path').join(paths.dryRuns(), `dryrun-${safe}.png`);
+  // Timestamped: one company often has several postings in a run, and a name keyed on
+  // the company alone kept only the last screenshot of them.
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '');
+  return require('path').join(paths.dryRuns(), `dryrun-${safe}-${stamp}-${Math.random().toString(36).slice(2, 6)}.png`);
 }
 
 // DRY_RUN guard: screenshot and return a DryRun result (no submit). Returns null

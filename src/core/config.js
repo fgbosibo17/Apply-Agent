@@ -6,6 +6,8 @@ const path = require('path');
 
 const DEFAULTS = {
   // ── Dedup / reapply ──────────────────────────────────────────────────────
+  hostBrowserSlots: 0,               // browser runs allowed at once on this host; 0 = auto
+                                     // (total PARALLEL_SESSIONS, else 1). See core/locks.js.
   companyReapplyCooldownDays: 9999,  // days before re-applying to the same company. 9999 = never: one company,
                                      // one application, for every persona (see core/company-cap.js for the
                                      // same-role / cross-persona rules). Lower it to allow a second try.

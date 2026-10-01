@@ -182,6 +182,21 @@ test('a wrong phone is caught, and formatting differences are not', () => {
   assert.equal(review.groundIdentity([{ label: 'Phone', value: '555-000-1234', kind: 'input' }], secondary).length, 1);
 });
 
+// Regression: /cell/ matched "excellence", and the grounding layer "fixed" an essay by
+// replacing it with the phone number. A live run would have submitted that.
+test('an essay whose prompt contains "excellence" or "email" is never rewritten with an identity value', () => {
+  const fields = [
+    { label: "We're serious about engineering excellence and recognize that great work takes time. Tell us about a project you are proud of.", value: 'With 5+ years in cloud support...', kind: 'textarea' },
+    { label: 'Describe how you would handle an escalated customer email', value: 'I would acknowledge it quickly...', kind: 'textarea' },
+    { label: 'Excellence', value: 'Ownership and craft', kind: 'input' },
+    { label: 'Cancellation policy acknowledged', value: 'Yes', kind: 'input' },
+  ];
+  assert.deepEqual(review.groundIdentity(fields, secondary), []);
+  // ...while real identity labels are still checked.
+  assert.equal(review.groundIdentity([{ label: 'Cell', value: '555-000-1234', kind: 'input' }], secondary).length, 1);
+  assert.equal(review.groundIdentity([{ label: 'E-mail address', value: 'other.person@example.com', kind: 'input' }], secondary).length, 1);
+});
+
 test('non-identity fields are left alone by the grounding layer', () => {
   const fields = [
     { label: 'Why do you want to work here?', value: 'Because I like testing.', kind: 'textarea' },

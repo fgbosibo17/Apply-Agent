@@ -18,9 +18,15 @@
 //
 // ── HOST SEMAPHORE — local resources ───────────────────────────────────────
 // `.state/locks/host-<machineId>.sem`, namespaced by machine so one host's runs
-// never block the other's. It limits this host to ONE browser run regardless of
-// persona: two Playwright Chrome sessions on a 14 GB 2015 laptop degrade each other,
-// which is the exact failure run-loop.js's fresh-browser batching exists to avoid.
+// never block the other's. By default it limits this host to ONE browser run
+// regardless of persona: two Playwright Chrome sessions on a small box degrade each
+// other, which is the exact failure run-loop.js's fresh-browser batching exists to
+// avoid.
+//
+// A host sized for more sets a slot count: hostSlots() is APPLY_AGENT_HOST_BROWSER_SLOTS
+// (config hostBrowserSlots) when set, else the total of PARALLEL_SESSIONS in
+// src/personas.js (so turning on 3 parallel sessions allows 3 browsers), else 1.
+// Slot 1 is `host-<machineId>.sem`; slot n is `host-<machineId>-s<n>.sem`.
 //
 // ── LIVENESS ───────────────────────────────────────────────────────────────
 // A holder is live if its heartbeat is fresh. Two ways it can be declared dead:
@@ -72,7 +78,37 @@ function lockPath(name) {
   return paths.lock(name);
 }
 const profileLockPath = (profileKey) => lockPath(`${profileKey}.lock`);
-const semaphorePath = (machineId) => lockPath(`host-${machineId || machine.id()}.sem`);
+const semaphorePath = (machineId, slot = 1) =>
+  lockPath(`host-${machineId || machine.id()}${slot > 1 ? `-s${slot}` : ''}.sem`);
+
+// How many browser runs this host allows at once (see the header).
+function hostSlots() {
+  const configured = Number(config().hostBrowserSlots);
+  if (Number.isFinite(configured) && configured >= 1) return Math.floor(configured);
+  try {
+    const { PARALLEL_SESSIONS } = require('../personas');
+    const total = Object.values(PARALLEL_SESSIONS || {}).reduce((n, c) => n + (Number(c) || 0), 0);
+    if (total > 1) return total;
+  } catch { /* personas.js not loadable — fall back to one */ }
+  return 1;
+}
+
+// Every slot file for this machine, slot 1 first.
+function hostSlotPaths() {
+  const out = [];
+  for (let s = 1; s <= hostSlots(); s++) out.push(semaphorePath(undefined, s));
+  // A slot count lowered since a run started must still be released and beaten.
+  try {
+    const prefix = `host-${machine.id()}-s`;
+    for (const name of fs.readdirSync(paths.locksDir())) {
+      if (name.startsWith(prefix) && name.endsWith('.sem')) {
+        const p = lockPath(name);
+        if (!out.includes(p)) out.push(p);
+      }
+    }
+  } catch { /* no locks dir yet */ }
+  return out;
+}
 
 function readLock(file) {
   try {
@@ -192,30 +228,44 @@ function acquireProfile({ profileKey, roundId = '', persona = '' } = {}) {
 
 // ─── host semaphore ────────────────────────────────────────────────────────
 
-// One browser run per host, whatever the persona.
+// hostSlots() browser runs per host (1 unless configured), whatever the persona.
+// Takes the first free or reclaimable slot; refuses only when every slot is live.
 function acquireHost({ roundId = '', persona = '', profileKey = '' } = {}) {
-  const file = semaphorePath();
-  return take({
-    file,
-    guard: SEMAPHORE,
-    record: {
-      guard: SEMAPHORE,
-      machineId: machine.id(),
-      hostname: machine.hostname(),
-      pid: process.pid,
-      roundId,
-      persona,
-      profileKey,
-      acquiredAt: nowIso(),
-      heartbeatAt: nowIso(),
-    },
-    refuse: (holder, state) => (
-      `this host is already running a browser session`
-      + `${holder.persona ? ` (${holder.persona}` : ' ('}${holder.roundId ? `, round ${holder.roundId}` : ''})`
-      + `, pid ${holder.pid}, heartbeat ${state.ageSeconds}s ago.`
-      + ' One browser run per machine: two Chrome sessions on one host degrade each other.'
-    ),
-  });
+  const slots = hostSlots();
+  let refusal = null;
+  for (let slot = 1; slot <= slots; slot++) {
+    try {
+      return take({
+        file: semaphorePath(undefined, slot),
+        guard: SEMAPHORE,
+        record: {
+          guard: SEMAPHORE,
+          slot,
+          machineId: machine.id(),
+          hostname: machine.hostname(),
+          pid: process.pid,
+          roundId,
+          persona,
+          profileKey,
+          acquiredAt: nowIso(),
+          heartbeatAt: nowIso(),
+        },
+        refuse: (holder, state) => (slots === 1
+          ? `this host is already running a browser session`
+            + `${holder.persona ? ` (${holder.persona}` : ' ('}${holder.roundId ? `, round ${holder.roundId}` : ''})`
+            + `, pid ${holder.pid}, heartbeat ${state.ageSeconds}s ago.`
+            + ' One browser run per machine: two Chrome sessions on one host degrade each other.'
+            + ' (A bigger host can allow more: APPLY_AGENT_HOST_BROWSER_SLOTS.)'
+          : `this host is already running ${slots} browser sessions, its limit`
+            + ` (last slot: ${holder.persona || '?'}${holder.roundId ? `, round ${holder.roundId}` : ''}, pid ${holder.pid}).`
+            + ' Raise APPLY_AGENT_HOST_BROWSER_SLOTS only if the machine has the memory for it.'),
+      });
+    } catch (e) {
+      if (!(e instanceof GuardRefusedError)) throw e;
+      refusal = e;
+    }
+  }
+  throw refusal;
 }
 
 // ─── both, in a fixed order ────────────────────────────────────────────────
@@ -244,7 +294,7 @@ function acquireAll({ profileKey, roundId = '', persona = '' } = {}) {
 // mid-application.
 function heartbeat({ profileKey, roundId } = {}) {
   const beaten = [];
-  for (const file of [profileKey ? profileLockPath(profileKey) : null, semaphorePath()]) {
+  for (const file of [profileKey ? profileLockPath(profileKey) : null, ...hostSlotPaths()]) {
     if (!file) continue;
     const rec = readLock(file);
     if (!rec) continue;
@@ -264,7 +314,7 @@ function heartbeat({ profileKey, roundId } = {}) {
 // the pid over, which restores dead-pid detection as a real signal.
 function adopt({ profileKey, roundId } = {}) {
   const adopted = [];
-  for (const file of [profileKey ? profileLockPath(profileKey) : null, semaphorePath()]) {
+  for (const file of [profileKey ? profileLockPath(profileKey) : null, ...hostSlotPaths()]) {
     if (!file) continue;
     const rec = readLock(file);
     if (!rec) continue;
@@ -297,7 +347,12 @@ function releaseFile(file, { roundId, force = false } = {}) {
 const releaseProfile = ({ profileKey, roundId, force } = {}) => (
   profileKey ? releaseFile(profileLockPath(profileKey), { roundId, force }) : { released: false, reason: 'no-profile-key' }
 );
-const releaseHost = ({ roundId, force } = {}) => releaseFile(semaphorePath(), { roundId, force });
+// Releases every slot this machine holds for the round (or, with no round id, every
+// slot this machine holds — the single-slot behaviour, extended).
+function releaseHost({ roundId, force } = {}) {
+  const results = hostSlotPaths().map((file) => releaseFile(file, { roundId, force }));
+  return results.find((r) => r.released) || results[0] || { released: false, reason: 'not-held' };
+}
 
 function releaseAll({ profileKey, roundId, force } = {}) {
   return {
@@ -339,10 +394,13 @@ function inspectProfile(profileKey) {
   if (!rec) return null;
   return { ...describeHolder(rec), ...assess(rec) };
 }
+// The first slot that has a holder (slot 1 on a single-slot host).
 function inspectHost() {
-  const rec = readLock(semaphorePath());
-  if (!rec) return null;
-  return { ...describeHolder(rec), ...assess(rec) };
+  for (const file of hostSlotPaths()) {
+    const rec = readLock(file);
+    if (rec) return { ...describeHolder(rec), ...assess(rec) };
+  }
+  return null;
 }
 
 // Break a lock regardless of holder, reporting exactly what was overridden. The
@@ -396,5 +454,7 @@ module.exports = {
   SEMAPHORE,
   profileLockPath,
   semaphorePath,
+  hostSlots,
+  hostSlotPaths,
   staleMinutes,
 };

@@ -535,7 +535,7 @@ async function applyIcims(page, jobMeta, answers, opts) {
 
   // DRY_RUN
   if (process.env.DRY_RUN) {
-    const shot = path.resolve(__dirname, `../../.state/dry-run-icims-${Date.now()}.png`);
+    const shot = require('../util/form').dryRunShotPath(`icims-${(meta && meta.company) || 'job'}`);
     await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
     return { status: 'DryRun', reason: `iCIMS form filled — screenshot ${shot}` };
   }

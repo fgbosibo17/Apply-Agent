@@ -30,8 +30,13 @@ async function applyBreezy(page, jobMeta) {
   if (/\bIndia\b|\bMumbai\b|\bBangalore\b|\bBengaluru\b|\bArgentina\b|\bMexico\b|\bColombia\b|\bBrazil\b|\bLATAM\b/i.test(pageText)) {
     return { status: 'Skipped', reason: 'Non-US location detected' };
   }
-  if (/security clearance|US citizenship required|must be a US citizen|ITAR|export control/i.test(pageText)) {
-    return { status: 'Skipped', reason: 'Requires US citizenship / clearance' };
+  // A clearance is skipped for everyone; citizenship / export control only when the
+  // persona is not a US citizen (`usCitizen` in src/personas.js).
+  if (/security clearance/i.test(pageText)) {
+    return { status: 'Skipped', reason: 'Requires a security clearance' };
+  }
+  if (a.usCitizen !== 'Yes' && /US citizenship required|must be a US citizen|ITAR|export control/i.test(pageText)) {
+    return { status: 'Skipped', reason: 'Requires US citizenship / export-control eligibility' };
   }
 
   // Click Apply button — Breezy uses a "Apply" button that opens a modal or scrolls to form

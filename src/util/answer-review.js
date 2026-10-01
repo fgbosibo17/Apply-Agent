@@ -46,14 +46,16 @@ const MAX_FIELDS = 40;
 const MAX_VALUE = 400;
 
 // Identity fields, and how to tell right from wrong for each. Keyed on what the label
-// asks for, valued by the persona property that answers it.
+// asks for, valued by the persona property that answers it. Whole words only: a bare
+// /cell/ matched "ex-CELL-ence" in an essay prompt and replaced the essay with the
+// phone number. groundIdentity() also skips essays (textareas, long labels).
 const IDENTITY_CHECKS = [
-  { what: 'email', label: /e-?mail/i, key: 'email', exact: true },
-  { what: 'phone', label: /phone|mobile|cell|telephone/i, key: 'phoneDigits', digits: true },
+  { what: 'email', label: /\be-?mail\b/i, key: 'email', exact: true },
+  { what: 'phone', label: /\b(phone|mobile|cell|cellphone|telephone)\b/i, key: 'phoneDigits', digits: true },
   { what: 'first name', label: /^(legal )?first name|given name|forename/i, key: 'firstName', exact: true },
   { what: 'last name', label: /^(legal )?last name|surname|family name/i, key: 'lastName', exact: true },
   { what: 'full name', label: /^(full|legal) name$|^name$/i, key: 'fullName', exact: true },
-  { what: 'LinkedIn', label: /linked ?in/i, key: 'linkedIn', contains: 'linkedin.com' },
+  { what: 'LinkedIn', label: /\blinked ?in\b/i, key: 'linkedIn', contains: 'linkedin.com' },
 ];
 
 const digitsOf = (s) => String(s || '').replace(/\D/g, '');
@@ -96,9 +98,14 @@ async function harvest(scope) {
 //
 // Only identity-bearing fields, and only where the persona is authoritative. A mismatch
 // here is not a style question — it is the wrong person's details on an application.
+// An identity field is a short single-line input. A textarea or a long, sentence-length
+// label is a question ABOUT something, never the place for an email or phone number.
+const IDENTITY_LABEL_MAX = 80;
+
 function groundIdentity(fields, persona) {
   const findings = [];
   for (const f of fields) {
+    if (f.kind === 'textarea' || String(f.label || '').length > IDENTITY_LABEL_MAX) continue;
     for (const check of IDENTITY_CHECKS) {
       if (!check.label.test(f.label)) continue;
       const expected = persona[check.key];

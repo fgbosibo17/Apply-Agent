@@ -48,7 +48,7 @@ You need **Node 20+** and **Google Chrome** (real Chrome, not Chromium — see [
 **Or by hand:**
 
 1. Drop your resume(s) into `Resume/`.
-2. Edit **`src/personas.js`** — your name, email, phone, location, work authorization, EEO answers, salary, target job titles (`matchKeywords`/`targetRoles`), and `resumePath`. It's all `<FILL_ME_IN>` placeholders to start. Delete the example personas you don't need — most people need one.
+2. Edit **`src/personas.js`** — your name, email, phone, location, work authorization, EEO answers, salary, target job titles (`matchKeywords`/`targetRoles`), and `resumePath`. It's all `<FILL_ME_IN>` placeholders to start. Delete the example personas you don't need — most people need one (any you leave untouched are skipped). `node src/check-personas.js` shows each persona and whether your `targetRoles` route back to it.
 3. Customize **`src/answer-bank.js`** — the example skills/answers are for tech roles; edit them for *your* field so screening answers ring true.
 
 > **Personas:** a persona is one resume + one set of target titles. The template ships three examples — `primary`, `adjacent` (same person, different resume) and `secondary` (a second identity). Two personas on the same identity share one browser profile automatically (`profileKey`).
@@ -171,11 +171,16 @@ Put the agent on an always-on Linux box and let it apply overnight, every night,
 
 - A **Linux server** (Ubuntu/Debian, x86-64 — Google Chrome has no Linux ARM build) — a cloud VM or a spare machine. Budget **~2 GB of RAM per browser** you run at once. Run the agent as a normal user, not root.
 - **Node 20+**, **Google Chrome** (`google-chrome-stable`), **xvfb** (a virtual screen) and **x11vnc** (to log in once).
+- **A real VM or machine, not a locked-down container.** Inside Docker/LXC, Chrome's sandbox needs `--security-opt seccomp=unconfined --cap-add SYS_ADMIN`; without it Chrome crashes on start.
 - **A private place for your profile.** Your filled-in `src/personas.js` and resumes contain your identity — never push them to a public fork. Either click **"Use this template" → Private** on GitHub, or copy those files to the server with `scp`.
 
 ```bash
-sudo apt-get install -y xvfb x11vnc
-# Chrome: https://www.google.com/chrome/ → .deb, then: sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+# Node 22 via nvm, as your normal user
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && . ~/.nvm/nvm.sh && nvm install 22
+
+# Chrome, the virtual screen and VNC
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt-get install -y ./google-chrome-stable_current_amd64.deb xvfb x11vnc
 ```
 
 ### 1. Bootstrap the server
@@ -192,7 +197,9 @@ scp src/personas.js you@server:~/job-agent/src/
 bash scripts/bootstrap.sh
 ```
 
-`bootstrap.sh` installs dependencies and hands over to `npm run doctor`, which checks Node, Playwright, **real Chrome**, `xvfb`, disk, the ledger, and every persona's resume and browser login. Every failure prints exactly what to do about it.
+Fill in your persona(s) in `src/personas.js` first (Part 1, step 2) — on the server, or on your laptop and copy it over. Example personas you leave untouched are skipped with a warning; you can also delete them.
+
+`bootstrap.sh` installs dependencies and hands over to `npm run doctor`, which checks Node, Playwright, **real Chrome**, `xvfb`, disk, the ledger, every persona's resume, and that each browser profile exists. Every failure prints exactly what to do about it.
 
 ### 2. Log in once per profile, over VNC
 
@@ -208,18 +215,22 @@ It starts a virtual screen with a VNC server on it (localhost only) and opens Ch
 ssh -N -L 5900:localhost:5900 you@server     # leave this running
 ```
 
-and open a VNC viewer at `localhost:5900` (macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`; Windows: TigerVNC or RealVNC). Sign in to Google first (needed to read the email security codes some ATSs send), then LinkedIn, and close Chrome — the script saves the login and exits. Repeat for each profile (`secondary`, …). `npm run doctor` confirms every profile is logged in.
+and open a VNC viewer at `localhost:5900` (macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`; Windows: TigerVNC or RealVNC). Sign in to Google first (needed to read the email security codes some ATSs send), then LinkedIn, and close Chrome — the script saves the login and exits (and says so plainly if Chrome crashed instead). Repeat for each profile (`secondary`, …). Then confirm each one is signed in to Google:
+
+```bash
+python3 scripts/gmail-session-check.py
+```
 
 > **Never copy a browser profile from your laptop.** A profile carries the device fingerprint of the machine that made it; a copied one is exactly what CAPTCHA scoring flags. Each machine logs in once, itself. And never switch the browser to `headless` to "fix" a server problem — headless sessions get silently rejected. The scripts run real Chrome on the virtual screen for you (`scripts/with-display.sh`).
 
 ### 3. Test with a dry run
 
 ```bash
-scripts/nightly-run.sh primary --max 3          # dry run (the default): fills + screenshots, submits nothing
+bash scripts/nightly-run.sh primary --max 3     # dry run (the default): fills + screenshots 3 forms, submits nothing
 ls .state/runs/dryrun/                          # look at the screenshots
 ```
 
-The command prints one JSON summary (the digest) on stdout; the detail is in `.state/runs/logs/`. When the screenshots look right, add `--live`.
+The command prints one JSON summary (the digest) on stdout; the detail is in `.state/runs/logs/`. Each form takes a minute or two (the agent paces itself on purpose); `npm run agent -- round stop --round <id>` ends a run early. When the screenshots look right, add `--live`. A practice run never uses up a job — the real run can still apply to it.
 
 The template ships with an **empty company list** (no one else's data). The first discovery fills it automatically from "Ask HN: Who is hiring?" — about 100 companies. For a much bigger pool, run this once (a few minutes):
 
@@ -234,10 +245,10 @@ npm run seed       # 6 months of Ask HN threads + 7 public remote job boards
 ```cron
 PATH=/home/you/.nvm/versions/node/v22.11.0/bin:/usr/local/bin:/usr/bin:/bin
 # every night at 01:00 UTC: all personas, real submissions, up to 50 each
-0 1 * * *  cd /home/you/job-agent && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
+0 1 * * *  cd /home/you/job-agent && mkdir -p .state/runs/logs && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
 ```
 
-(The scripts also look in the usual nvm/volta/`/usr/local` places if Node isn't on `PATH`, but the explicit line is what to rely on.)
+(The scripts also look in the usual nvm/volta/`/usr/local` places if Node isn't on `PATH`, but the explicit line is what to rely on.) Runs never commit or push anything — history stays in `.state/` on the server — so the server needs no git credentials.
 
 Tune it with environment variables in front of the command:
 
@@ -247,22 +258,29 @@ Tune it with environment variables in front of the command:
 | `TARGET_<PERSONA>` | — | Per-persona override, e.g. `TARGET_PRIMARY=75` |
 | `PERSONAS` | every persona | Which personas run, e.g. `"primary secondary"` |
 | `PRIORITY_PERSONA` | — | Always goes first each cycle |
-| `MAX_ROUNDS` | `8` | Cycles through the personas per night |
+| `MAX_CYCLES` | `8` | Cycles through the personas per night |
 | `MAX_EVAL_CAP` | `150` | Listings evaluated per round (keeps rounds short) |
 | `NEXT_START_UTC` | `01:00` | Your cron time — the run stops 15 min before the next one |
 
 ### 5. More throughput (optional)
 
-**Parallel sessions** — one persona as several browsers at once, each with its own profile and queue, one shared ledger so no job is applied to twice. In `src/personas.js` set `PARALLEL_SESSIONS = { primary: 3 }`, log in once to `browser-profile-primary2` and `-primary3` (step 2), then let the watchdog keep them running all day:
+**Parallel sessions** — one persona as several browsers at once, each with its own profile and queue, one shared ledger so no job is applied to twice. In `src/personas.js` set `PARALLEL_SESSIONS = { primary: 3 }` (that also lets this machine run 3 browsers at once; override with `APPLY_AGENT_HOST_BROWSER_SLOTS`), log in once to each extra profile (`bash scripts/login-profile.sh primary2`, then `primary3`), then let the watchdog keep them running all day:
 
 ```cron
-*/5 * * * *  cd /home/you/job-agent && bash scripts/watchdog-sessions.sh primary 3 --live
+*/5 * * * *  cd /home/you/job-agent && mkdir -p .state/runs/logs && bash scripts/watchdog-sessions.sh primary 3 --live
+```
+
+Without `--live` the sessions are dry runs. To stop them cleanly — jobs in flight finish, rounds close, and the watchdog stops restarting them:
+
+```bash
+bash scripts/stop-sessions.sh primary            # pause
+bash scripts/stop-sessions.sh primary --resume   # let the watchdog start them again
 ```
 
 **A one-off push** — get one persona to a number right now, outside the night:
 
 ```bash
-scripts/persona-push.sh primary 75      # stops after two rounds in a row with no gain (--dry-run to rehearse)
+scripts/persona-push.sh primary 75 --live   # stops after two rounds in a row with no gain (omit --live to rehearse)
 ```
 
 ### 6. Morning summary and alerts (optional)
@@ -277,7 +295,7 @@ EOF
 chmod 600 ~/.telegram_notify_credentials
 ```
 
-You'll get a message when each night ends (applied vs. target per persona, errors, duration), and an alert if a browser profile loses its Google login (`scripts/gmail-session-check.py`, run before each night). Set `NOTIFY_TZ=America/New_York` for local times. Without credentials, both just print.
+You'll get a message when each night ends (applied vs. target per persona, errors, duration), and an alert if a browser profile loses its Google login (`scripts/gmail-session-check.py`, run before each night). Set `NOTIFY_TZ=America/New_York` for local times. Without credentials nothing is sent: the Gmail check prints its result to the cron log, and the summary is still saved in `.state/runs/logs/orchestrator-*-summary.json`.
 
 ### 7. Laptop and server together (optional)
 
@@ -290,7 +308,7 @@ APPLY_AGENT_STATE_S3_PROFILE=runner                 # aws CLI profile with read 
 
 `npm run doctor` confirms the profile can both read and write the bucket.
 
-Locks make sure the two machines never use the same browser profile at the same time, and duplicate checks hold across both. Browser profiles are never synced.
+Locks make sure the two machines never use the same browser profile at the same time, and duplicate checks hold across both. Browser profiles are never synced. (Want run history in git as well? Only in a **private** repo: add an empty `.private-data-repo` file and the runs commit their CSVs and push.)
 
 ### Day to day
 
@@ -298,6 +316,7 @@ Locks make sure the two machines never use the same browser profile at the same 
 npm run agent -- digest --since 1d                 # last night's results
 npm run agent -- round list                        # recent runs
 npm run agent -- round stop --round <id>           # stop gracefully (finishes the job in flight)
+bash scripts/stop-sessions.sh primary              # stop all parallel sessions of a persona
 npm run agent -- round locks                       # who holds which profile, and how stale
 npm run agent -- round unlock --force --persona primary   # only if that run is definitely dead
 npm run agent -- gc                                # clean old screenshots, logs, rendered PDFs
@@ -473,6 +492,7 @@ scripts/
   persona-push.sh     get one persona to a number now
   bootstrap.sh        set up a new machine, then `npm run doctor`
   login-profile.sh    log a persona in once on a headless server, over VNC
+  stop-sessions.sh    stop (and pause) a persona's parallel sessions cleanly
   notify-telegram.py, gmail-session-check.py   optional alerts
 data/companies.json   public ATS company tokens (the discovery seed) — shareable, no personal data
 CLAUDE.md             instructions + setup wizard for Claude Code

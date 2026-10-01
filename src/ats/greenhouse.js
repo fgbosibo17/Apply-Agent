@@ -673,12 +673,19 @@ async function applyGreenhouse(page, jobMeta) {
   if (/\bIndia\b|\bMumbai\b|\bBangalore\b|\bBengaluru\b|\bPune\b|\bHyderabad\b|\bChennai\b|\bDelhi\b|\bGurgaon\b|\bNoida\b|\bIND\b|\bArgentina\b|\bMexico\b|\bColombia\b|\bBrazil\b|\bPeru\b|\bChile\b|\bUruguay\b|\bLATAM\b|\bSouth Africa\b|\bLithuania\b|\bUkraine\b|\bPhilippines\b|\bVilnius\b|\bBerlin\b|\bGermany\b|\bLondon\b|\bUK\b|\bUnited Kingdom\b|\bEMEA\b|\bAPAC\b/i.test(locationHeader)) {
     return { status: 'Skipped', reason: `Non-US location: "${locationHeader.slice(0, 80)}"` };
   }
-  // Scan the WHOLE posting (not just the header) for citizenship/clearance/export-
-  // control requirements — these are often in a question lower in the form, and
-  // the persona (green-card holder) can't satisfy them. Skip before filling.
+  // Scan the WHOLE posting (not just the header) for clearance and citizenship /
+  // export-control requirements — these are often in a question lower in the form.
+  // Skip before filling. A clearance is skipped for everyone (holding one is not a
+  // persona field); citizenship and export control only when the persona is NOT a
+  // US citizen (`usCitizen` in src/personas.js).
   const fullText = await page.evaluate(() => document.body.innerText).catch(() => '');
-  if (/security clearance|government[- ]?issued clearance|clearance\s*(level|eligib|is required|required|to obtain|to maintain)|(active|obtain|maintain|hold an?)\s+\w*\s*clearance|\bTS\/SCI\b|\bpolygraph\b|export control|\bITAR\b|active\s+(secret|top secret)|requires?\s+(u\.?s\.?\s+)?citizenship|u\.?s\.?\s+citizen(?:ship)?\s+(is\s+)?(required|only|req)|must be (a |an )?(u\.?s\.?|united states)\s+(citizen|person|national)|citizenship\s+(is\s+)?required|u\.?s\.?\s+citizens\s+only/i.test(fullText)) {
-    return { status: 'Skipped', reason: 'Requires US citizenship / clearance / export-control eligibility' };
+  const CLEARANCE = /security clearance|government[- ]?issued clearance|clearance\s*(level|eligib|is required|required|to obtain|to maintain)|(active|obtain|maintain|hold an?)\s+\w*\s*clearance|\bTS\/SCI\b|\bpolygraph\b|active\s+(secret|top secret)/i;
+  const CITIZENS_ONLY = /export control|\bITAR\b|requires?\s+(u\.?s\.?\s+)?citizenship|u\.?s\.?\s+citizen(?:ship)?\s+(is\s+)?(required|only|req)|must be (a |an )?(u\.?s\.?|united states)\s+(citizen|person|national)|citizenship\s+(is\s+)?required|u\.?s\.?\s+citizens\s+only/i;
+  if (CLEARANCE.test(fullText)) {
+    return { status: 'Skipped', reason: 'Requires a security clearance' };
+  }
+  if (!/^yes$/i.test(String(a.usCitizen || '').trim()) && CITIZENS_ONLY.test(fullText)) {
+    return { status: 'Skipped', reason: 'Requires US citizenship / export-control eligibility' };
   }
   // "Prepared by AI?" question — per explicit user instruction, answer No and
   // proceed (handled in chooseOption / valueForLabel), rather than skipping.

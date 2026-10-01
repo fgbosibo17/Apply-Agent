@@ -38,6 +38,7 @@ function emptyProgress() {
     applied: 0,
     skipped: 0,
     errored: 0,
+    dryRun: 0,
     blocked: emptyBlocked(),
     batches: 0,
     lastJob: null,
@@ -87,7 +88,7 @@ function record(roundId, delta = {}) {
   p.blocked = { ...emptyBlocked(), ...(p.blocked || {}) };
   if (!p.startedAt) p.startedAt = new Date().toISOString();
 
-  for (const key of ['evaluated', 'applied', 'skipped', 'errored', 'batches']) {
+  for (const key of ['evaluated', 'applied', 'skipped', 'errored', 'dryRun', 'batches']) {
     if (delta[key]) p[key] = (p[key] || 0) + Number(delta[key]);
   }
   if (delta.blockedKind) {
@@ -114,6 +115,7 @@ function recordJob(roundId, { status, company, role, reason } = {}) {
   const delta = { evaluated: 1, lastJob: { company, role, status } };
   if (status === 'Applied') delta.applied = 1;
   else if (status === 'Skipped') delta.skipped = 1;
+  else if (status === 'DryRun') delta.dryRun = 1;   // a rehearsal, not a failure
   else delta.errored = 1;
   const kind = classifyBlocked(reason);
   if (kind) delta.blockedKind = kind;

@@ -288,11 +288,14 @@ function profileSiblings(profileKey) {
 
 // Route a job title + description to the best persona. Order = priority: list
 // your MOST SPECIFIC persona first so it wins ties. Returns null if no fit.
+// Walks `personas` in the order they are written above, so deleting the examples you
+// don't need is safe. Parallel-session clones (primary2, ...) route as their base.
 function routePersona(titleAndJD) {
   const t = titleAndJD || '';
-  if (personas.primary.matchKeywords.test(t)) return 'primary';
-  if (personas.adjacent.matchKeywords.test(t)) return 'adjacent';
-  if (personas.secondary.matchKeywords.test(t)) return 'secondary';
+  for (const [key, p] of Object.entries(personas)) {
+    if (/\d$/.test(key)) continue;
+    if (p.matchKeywords instanceof RegExp && p.matchKeywords.test(t)) return key;
+  }
   return null; // no fit
 }
 
@@ -305,4 +308,5 @@ module.exports = {
   profileDirFor,
   profileSiblings,
   PROFILE_PREFIX,
+  PARALLEL_SESSIONS,
 };

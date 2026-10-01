@@ -30,7 +30,12 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 . scripts/lib/ensure-node.sh
 
 TARGET="${TARGET:-50}"
-MAX_ROUNDS="${MAX_ROUNDS:-8}"
+# Cycles through the personas per night. Named MAX_CYCLES because src/run-loop.js reads
+# MAX_ROUNDS from the environment as its batch cap; an exported MAX_ROUNDS=1 meant for
+# this script silently cut every round to one batch. MAX_ROUNDS is still accepted here
+# for older crontabs, and unset so it never reaches the runner.
+MAX_CYCLES="${MAX_CYCLES:-${MAX_ROUNDS:-8}}"
+unset MAX_ROUNDS
 MAX_EVAL_CAP="${MAX_EVAL_CAP:-150}"
 RUN_HOURS="${RUN_HOURS:-22}"
 # Daily cron start (UTC, HH:MM). The run stops 15 minutes before the next one.
@@ -47,7 +52,8 @@ if ! flock -w 5400 9; then
 fi
 
 # Optional: warn early if a profile has lost its Google session (it reads email codes).
-python3 scripts/gmail-session-check.py 2>&1 | tee -a "$LOG_DIR/gmail-session-check.log" || true
+# stdout is reserved for the summary JSON, so the check's report goes to stderr + its log.
+python3 scripts/gmail-session-check.py 2>&1 | tee -a "$LOG_DIR/gmail-session-check.log" >&2 || true
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 START_ISO="$(date -u +%Y-%m-%dT%H:%M:%S)"
@@ -162,7 +168,7 @@ for p in "${PERSONAS[@]}"; do
 done
 
 CYCLE=0
-while [ "$CYCLE" -lt "$MAX_ROUNDS" ]; do
+while [ "$CYCLE" -lt "$MAX_CYCLES" ]; do
   CYCLE=$((CYCLE + 1))
   ACTIVE=0
   for p in "${PERSONAS[@]}"; do
@@ -185,7 +191,7 @@ while [ "$CYCLE" -lt "$MAX_ROUNDS" ]; do
       continue
     fi
     ACTIVE=1
-    echo "--- [$p] cycle $CYCLE/$MAX_ROUNDS - $CURRENT/$PT applied, need $NEED ---" >&2
+    echo "--- [$p] cycle $CYCLE/$MAX_CYCLES - $CURRENT/$PT applied, need $NEED ---" >&2
     T0=$(date +%s)
     if [ "${DISCOVERED[$p]}" -eq 0 ]; then
       run_discovery "$p"

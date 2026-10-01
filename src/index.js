@@ -225,6 +225,10 @@ async function main() {
   let stopped = null;
   let skipped = 0;
   let errored = 0;
+  // Dry-run rehearsals: filled and screenshotted, never submitted. In a dry run they
+  // are what SESSION_TARGET counts, so `--dry-run --max 3` stops after three.
+  let rehearsed = 0;
+  const IS_DRY = !!process.env.DRY_RUN;
 
   // Pacing: put real time between applications.
   //
@@ -240,8 +244,8 @@ async function main() {
   let paced = 0;
 
   for (const job of queue) {
-    if (applied >= SESSION_TARGET) {
-      console.log(`\nHit SESSION_TARGET=${SESSION_TARGET}. Stopping.`);
+    if (applied + (IS_DRY ? rehearsed : 0) >= SESSION_TARGET) {
+      console.log(`\nHit SESSION_TARGET=${SESSION_TARGET}${IS_DRY ? ' (dry-run rehearsals)' : ''}. Stopping.`);
       break;
     }
     if (evaluated >= MAX_EVALUATED) {
@@ -480,7 +484,9 @@ async function main() {
 
     const transientBlock = result.status === `Skipped`
       && /datadome|anti-bot|captcha|rate.?limit|too many requests|blocked by/i.test(result.reason || ``);
-    if (result.status !== `Error` && !transientBlock) {
+    // A dry-run rehearsal is not an outcome either: marking it seen would make the
+    // practice run burn the job, and the real run after it would skip it as a duplicate.
+    if (result.status !== `Error` && result.status !== `DryRun` && !transientBlock) {
       appendSeen({ company: job.company, role: job.role, url, action: result.status, reason: result.reason });
     }
     if (result.status === 'Applied') {
@@ -538,6 +544,9 @@ async function main() {
           console.error('    ⚠ attention write failed:', e.message);
         }
       }
+    } else if (result.status === 'DryRun') {
+      rehearsed++;
+      console.log(`    📝 Dry run (${rehearsed}/${SESSION_TARGET}) — filled, not submitted`);
     } else {
       errored++;
       queues.frictionRecord({

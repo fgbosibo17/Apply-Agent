@@ -113,7 +113,7 @@ LOGGED_IN_BOARDS: linkedin, builtin, wellfound, workatastartup, welcometothejung
 > `scripts/go.sh` is the envelope that does all of it: git pull, deps, doctor, state
 > pull, round start (lock + semaphore + resume/disk/schema preflight), discovery,
 > tailoring, the apply batches via `scripts/run-persona.sh`, round complete, commit and
-> push, GC, state push, and a digest on stdout. `scripts/nightly-run.sh` is the same
+> push (only in a private repo marked `.private-data-repo`), GC, state push, and a digest on stdout. `scripts/nightly-run.sh` is the same
 > envelope for the scheduled and remote-triggered path (dry run unless `--live`), and
 > `scripts/nightly-orchestrator.sh` runs every persona overnight — see ONBOARDING.md,
 > "Running on a second machine".

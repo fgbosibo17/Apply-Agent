@@ -62,6 +62,11 @@ fi
 log "=== session $N/$SESSIONS started (queue-${PERSONA}.json, ${MODE[0]}) ==="
 ROUND=0
 while true; do
+  # Paused by scripts/stop-sessions.sh: finish here instead of starting another round.
+  if [ -f ".state/sessions/$BASE.paused" ]; then
+    log "paused (scripts/stop-sessions.sh) — exiting"
+    exit 0
+  fi
   ROUND=$((ROUND + 1))
   TODAY=$(BASE="$BASE" node -e "
     const fs = require('fs');
@@ -109,7 +114,7 @@ while true; do
   log "applying..."
   APPLY_GAP_MS="${APPLY_GAP_MS:-2000}" APPLY_JITTER_MS="${APPLY_JITTER_MS:-2000}" \
   APPLY_BREATHER_EVERY="${APPLY_BREATHER_EVERY:-30}" APPLY_BREATHER_MS="${APPLY_BREATHER_MS:-10000}" \
-    bash scripts/with-display.sh bash scripts/nightly-run.sh "$PERSONA" "${MODE[@]}" \
+    bash scripts/with-display.sh bash scripts/nightly-run.sh "$PERSONA" "${MODE[@]}" --no-discover \
       --max "${SESSION_MAX:-100}" --max-eval "${SESSION_MAX_EVAL:-300}" >> "$LOG" 2>&1 || true
 
   log "round $ROUND done"

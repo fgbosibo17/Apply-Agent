@@ -8,6 +8,34 @@ Format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Newest first.
 
 ## [Unreleased]
+### Fixed — found by an end-to-end server test (2026-10-01)
+- **Run guards were never taken.** The run envelope fed every `--stdin` command an
+  empty document (`< /dev/null` replaced the pipe), so rounds started with no persona:
+  no profile lock, no host semaphore, and preflight checked every persona instead of
+  the one running. Fixed, with a test that every piped call keeps its payload.
+- **Host semaphore slots.** With locks working, parallel sessions need more than one
+  browser per host: `PARALLEL_SESSIONS` now sets the slot count automatically, or set
+  `APPLY_AGENT_HOST_BROWSER_SLOTS`. One slot remains the default.
+- **The answer reviewer could replace an essay with the phone number** — `/cell/`
+  matched "ex**cell**ence". Identity labels now match whole words and never textareas
+  or sentence-length prompts.
+- **Placeholder personas.** Unused example personas no longer block rounds (they warn),
+  running a placeholder persona is refused, and deleting examples no longer crashes
+  routing.
+- **Dry runs** stop at `--max`, count as `dryRun` (not errors) in digests, keep one
+  screenshot per form, and no longer mark the job seen — the real run can still apply.
+- **Citizenship-only postings** are skipped only when the persona is not a US citizen
+  (clearance-required postings are still skipped for everyone).
+- `scripts/login-profile.sh` reports a Chrome crash instead of "saved"; core dumps are
+  ignored. The Gmail check points a server at `login-profile.sh`.
+- `scripts/stop-sessions.sh` stops and pauses parallel sessions cleanly; sessions no
+  longer re-run discovery (`nightly-run.sh --no-discover`); `persona-push.sh` is a dry
+  run unless `--live` and rejects unknown flags; the orchestrator's cycle cap is
+  `MAX_CYCLES` (an exported `MAX_ROUNDS` also capped the runner's batches) and its
+  stdout is pure JSON.
+- Runs commit run history only in a private repo marked `.private-data-repo`; elsewhere
+  it stays in `.state/` and no git credentials are needed.
+
 ### Added — overnight server runs, more ATSs, resume tailoring (2026-10-01)
 - **Six more ATS handlers** — Workday, iCIMS, Jobvite, BambooHR, Breezy and
   Rippling, plus Workday discovery (`src/discover-workday.js`) over the tenants

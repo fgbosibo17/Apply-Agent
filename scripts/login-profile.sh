@@ -31,6 +31,7 @@ fi
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 # shellcheck source=scripts/lib/ensure-node.sh
 . scripts/lib/ensure-node.sh
+command -v node >/dev/null 2>&1 || { echo "Node.js is needed to resolve the persona's profile — install Node 20+ first (see README, Part 2)." >&2; exit 1; }
 
 DISP="${LOGIN_DISPLAY:-:77}"
 PORT="${VNC_PORT:-5900}"
@@ -128,7 +129,30 @@ EOF
 # --password-store=basic and --use-mock-keychain are what Playwright passes when the
 # runner launches this profile. Chrome encrypts cookies with a key chosen by those
 # flags, so logging in WITHOUT them saves a session the runner cannot read.
-DISPLAY="$DISP" "$CHROME" ${SANDBOX[@]+"${SANDBOX[@]}"} --user-data-dir="$DIR" \
+CHROME_LOG="$(mktemp "${TMPDIR:-/tmp}/login-profile-chrome.XXXXXX")"
+STARTED="$(date +%s)"
+# Run from /tmp so a crashing Chrome can never drop a core file into the repo.
+( cd "${TMPDIR:-/tmp}" && DISPLAY="$DISP" "$CHROME" ${SANDBOX[@]+"${SANDBOX[@]}"} --user-data-dir="$DIR" \
   --no-first-run --no-default-browser-check --password-store=basic --use-mock-keychain \
-  https://accounts.google.com/ https://www.linkedin.com/login >/dev/null 2>&1
-echo "Chrome closed — profile saved at $DIR. Check it with: npm run doctor"
+  https://accounts.google.com/ https://www.linkedin.com/login ) >"$CHROME_LOG" 2>&1
+CHROME_STATUS=$?
+RAN=$(( $(date +%s) - STARTED ))
+
+# A normal close exits 0. A crash (seccomp/sandbox in a container, missing libraries)
+# exits non-zero within seconds — and must not be reported as a saved login.
+if [ "$CHROME_STATUS" -ne 0 ] && [ "$RAN" -lt 20 ]; then
+  echo "Chrome exited with status $CHROME_STATUS after ${RAN}s — it crashed, nothing was logged in." >&2
+  echo "Last lines of its output:" >&2
+  tail -n 15 "$CHROME_LOG" | sed 's/^/  /' >&2
+  echo "Inside Docker/LXC, Chrome's sandbox needs: --security-opt seccomp=unconfined --cap-add SYS_ADMIN (or a full VM)." >&2
+  rm -f "$CHROME_LOG"
+  exit 1
+fi
+rm -f "$CHROME_LOG"
+if [ -f "$DIR/Default/Cookies" ] || [ -f "$DIR/Default/Network/Cookies" ]; then
+  echo "Chrome closed — profile saved at $DIR."
+  echo "Check the Google login with: python3 scripts/gmail-session-check.py   (and: npm run doctor)"
+else
+  echo "Chrome closed, but no cookies were saved in $DIR — did you sign in? Run this again if not." >&2
+  exit 1
+fi

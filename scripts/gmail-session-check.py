@@ -106,17 +106,20 @@ def main():
         if result is True:
             print(f"  ✅ {label}: Gmail signed in")
         elif result is False:
-            print(f"  ❌ {label}: Gmail NOT signed in — session lost!")
+            print(f"  ❌ {label}: NOT signed in to Google")
             problems.append(label)
         else:
             print(f"  ⚠️  {label}: profile not found or unreadable")
 
     if problems:
+        # A headless server logs in over VNC; a machine with a screen opens Chrome directly.
+        headless = sys.platform.startswith("linux") and not os.environ.get("DISPLAY")
+        login = "bash scripts/login-profile.sh" if headless else "node setup-browser-login.js"
         msg = (
-            "🚨 GMAIL SESSION LOST — apply agent will fail to enter verification codes!\n\n"
-            + "\n".join(f"• {p}: Gmail signed out" for p in problems)
-            + "\n\nAction: sign back into Google in the affected profile(s) on the runner:\n"
-            + "\n".join(f"  node setup-browser-login.js {p}   ({os.path.join(REPO, 'browser-profile-' + p)})" for p in problems)
+            "🚨 GOOGLE NOT SIGNED IN — the agent cannot read emailed verification codes for:\n\n"
+            + "\n".join(f"• {p}" for p in problems)
+            + "\n\nAction: sign in to Google in the affected profile(s) on this machine:\n"
+            + "\n".join(f"  {login} {p}   ({os.path.join(REPO, 'browser-profile-' + p)})" for p in problems)
             + "\n"
             + "\nApplications requiring a security code will be skipped until this is fixed."
         )

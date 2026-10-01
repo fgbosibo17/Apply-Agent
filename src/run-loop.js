@@ -121,10 +121,17 @@ process.on('uncaughtException', (e) => {
 // carrying this round id — the same number `apply-agent round status <id>` reports,
 // which is what scripts/run-persona.sh prints. TARGET now means "this many
 // submissions in this run", which is what a caller passing a target intends.
+//
+// In a DRY_RUN nothing is ever submitted, so this would stay at 0 and the loop would
+// keep launching batches until MAX_DRY_ROUNDS — `--dry-run --max 3` ran for hours.
+// There, the rehearsals recorded in the round's progress are what counts.
 function appliedCount() {
   try {
     const st = rounds.status(LOOP_ROUND.id);
-    return st ? st.submitted : 0;
+    const submitted = st ? st.submitted : 0;
+    if (!process.env.DRY_RUN) return submitted;
+    const prog = require('./core/progress').get(LOOP_ROUND.id);
+    return submitted + ((prog && prog.dryRun) || 0);
   } catch { return 0; }
 }
 

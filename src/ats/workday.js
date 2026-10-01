@@ -646,7 +646,7 @@ async function applyWorkday(page, jobMeta, answers, opts) {
 
   // DRY_RUN: stop before submit
   if (process.env.DRY_RUN) {
-    const shot = path.resolve(__dirname, `../../.state/dry-run-workday-${tenant}-${Date.now()}.png`);
+    const shot = require('../util/form').dryRunShotPath(`workday-${tenant}`);
     await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
     return { status: 'DryRun', reason: `Workday form filled — screenshot ${shot}` };
   }

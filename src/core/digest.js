@@ -178,6 +178,7 @@ function forRound(roundId) {
       applied: prog.applied,
       skipped: prog.skipped,
       errored: prog.errored,
+      dryRun: prog.dryRun || 0,
       batches: prog.batches,
       // The ledger is the authority on submissions; a disagreement with progress.applied
       // is itself worth seeing rather than hiding behind one number.
@@ -208,7 +209,7 @@ function since(days, { persona = null } = {}) {
     return !Number.isNaN(t) && t >= cutoff && (!persona || r.persona === persona);
   });
 
-  const zero = { evaluated: 0, applied: 0, skipped: 0, errored: 0, batches: 0, ledgerSubmissions: 0 };
+  const zero = { evaluated: 0, applied: 0, skipped: 0, errored: 0, dryRun: 0, batches: 0, ledgerSubmissions: 0 };
   const counts = { ...zero };
   const blocked = {};
   const tail = { accepted: 0, rejected: 0, fallback: 0 };
@@ -288,7 +289,8 @@ function telegram(d) {
   const head = isWindow
     ? `${d.window.days}d: ${d.rounds.count} round(s)`
     : `${d.round.persona || 'run'} ${d.round.id.slice(-8)}${d.round.running ? ' (running)' : ''}`;
-  lines.push(`${head} — ${c.applied || 0} applied, ${c.skipped || 0} skipped, ${c.errored || 0} err of ${c.evaluated || 0}`);
+  lines.push(`${head} — ${c.applied || 0} applied, ${c.skipped || 0} skipped, ${c.errored || 0} err`
+    + `${c.dryRun ? `, ${c.dryRun} dry-run` : ''} of ${c.evaluated || 0}`);
 
   if (!isWindow && d.round.stopped) lines.push('⏹ stopped early');
 
@@ -337,7 +339,7 @@ function failureEnvelope({ roundId = '', stage = 'unknown', error = '', persona 
   }
 
   // No round: same keys, zeroed, so a consumer needs no special case.
-  const zero = { evaluated: 0, applied: 0, skipped: 0, errored: 0, batches: 0, ledgerSubmissions: 0, remaining: null, lastJob: null, lastUpdateAt: null };
+  const zero = { evaluated: 0, applied: 0, skipped: 0, errored: 0, dryRun: 0, batches: 0, ledgerSubmissions: 0, remaining: null, lastJob: null, lastUpdateAt: null };
   return {
     schema: 1,
     generatedAt: new Date().toISOString(),

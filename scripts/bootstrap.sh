@@ -108,17 +108,21 @@ printf '\n'
 if [ "$DOCTOR_STATUS" -eq 0 ]; then
   bold "Ready."
   printf '    Next:\n'
-  printf '      npm run agent -- doctor            re-check any time (JSON)\n'
-  if [ "$(uname -s)" = "Linux" ]; then
-    printf '      xvfb-run -a npm run apply          apply, headful under Xvfb\n'
+  printf '      npm run doctor                             re-check any time\n'
+  if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ]; then
+    printf '      bash scripts/nightly-run.sh <persona> --max-eval 5     dry run: fill + screenshot, submit nothing\n'
+    printf '      then schedule scripts/nightly-orchestrator.sh --live   (README, Part 2, step 4)\n'
   else
-    printf '      npm run apply                      apply\n'
+    printf '      npm run go -- <persona> --dry-run --max 3  dry run: fill + screenshot, submit nothing\n'
+    printf '      npm run go -- <persona>                    the real thing\n'
   fi
-  printf '      PERSONA=secondary DRY_RUN=1 npm run apply fill forms without submitting\n'
 else
   bold "Not ready."
   printf '    Fix the FAIL lines above (each has a -> remedy), then re-run:\n'
   printf '      bash scripts/bootstrap.sh --check\n'
+  if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ]; then
+    printf '    Browser logins on this server: bash scripts/login-profile.sh <persona>  (over VNC)\n'
+  fi
 fi
 
 exit "$DOCTOR_STATUS"

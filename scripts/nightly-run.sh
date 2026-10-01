@@ -42,17 +42,19 @@ AGENT_DISCOVER="node src/discover-api.js"
 
 usage() {
   cat >&2 <<EOF
-usage: $(basename "$0") <persona> [--live] [--max <n>] [--max-eval <n>] [--batch <n>] [--tailor] [--no-push]
+usage: $(basename "$0") <persona> [--live] [--max <n>] [--max-eval <n>] [--batch <n>] [--tailor] [--no-push] [--no-discover]
 
   <persona>    primary | adjacent | secondary — exactly one. The orchestrator picks which.
   --live       actually submit. WITHOUT THIS THE RUN IS A DRY RUN.
   --max <n>    submissions to aim for (default ${ENV_MAX}, deliberately conservative)
-  --max-eval <n> candidates to EVALUATE before giving up (default ${ENV_MAX_EVAL}).
+  --max-eval <n> candidates to EVALUATE per fresh-browser batch (default ${ENV_MAX_EVAL}).
                Distinct from --max: not every evaluated job becomes a submission,
-               so reaching --max N needs roughly N/apply-rate evaluations.
+               so reaching --max N needs roughly N/apply-rate evaluations. The run
+               ends at --max, or after 4 batches in a row that gain nothing.
   --batch <n>  submissions per fresh browser (default ${ENV_BATCH})
   --tailor     tailor each resume to its posting first (needs a model backend)
   --no-push    commit locally but do not git push
+  --no-discover skip the discovery stage (parallel sessions discover once, centrally)
 
 stdout: one digest JSON document, always. stderr: progress. logs: .state/runs/logs/
 EOF
@@ -65,6 +67,7 @@ while [ $# -gt 0 ]; do
     --dry-run)  ENV_DRY_RUN=1 ;;
     --tailor)   ENV_TAILOR=1 ;;
     --no-push)  ENV_PUSH=0 ;;
+    --no-discover) ENV_DISCOVER=0 ;;
     --max)      ENV_MAX="${2:-}"; shift ;;
     --max-eval) ENV_MAX_EVAL="${2:-}"; shift ;;
     --batch)    ENV_BATCH="${2:-}"; shift ;;

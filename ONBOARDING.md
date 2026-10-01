@@ -431,14 +431,14 @@ PERSONAS="primary secondary" TARGET=40 scripts/nightly-orchestrator.sh --live
 PRIORITY_PERSONA=secondary TARGET_SECONDARY=75 scripts/nightly-orchestrator.sh --live
 ```
 
-Knobs (env): `TARGET`, `TARGET_<PERSONA>`, `PERSONAS`, `PRIORITY_PERSONA`, `MAX_ROUNDS`
+Knobs (env): `TARGET`, `TARGET_<PERSONA>`, `PERSONAS`, `PRIORITY_PERSONA`, `MAX_CYCLES`
 (cycles, default 8), `MAX_EVAL_CAP` (listings per round, default 150), `RUN_HOURS`
 (default 22) and `NEXT_START_UTC` (your cron start, default `01:00`).
 
 **A one-off push** gets one persona to a number now, outside the night:
 
 ```bash
-scripts/persona-push.sh primary 75      # stops after two rounds in a row with no gain
+scripts/persona-push.sh primary 75 --live   # stops after two rounds in a row with no gain (omit --live to rehearse)
 ```
 
 **Parallel sessions** run one persona as several concurrent browsers — same identity,
@@ -450,7 +450,11 @@ results out across every session's queue.
 
 ```bash
 scripts/watchdog-sessions.sh primary 3 --live  # starts any of sessions 1-3 that is not running
+scripts/stop-sessions.sh primary                # stop them cleanly; --resume to let the watchdog restart them
 ```
+
+`PARALLEL_SESSIONS` also raises how many browsers this machine may run at once (the host
+semaphore); set `APPLY_AGENT_HOST_BROWSER_SLOTS` to choose that number yourself.
 
 Mind the host: each session is a full Chrome. Size the count to the box's RAM.
 
@@ -475,7 +479,7 @@ scripts print instead of sending.
 ```cron
 PATH=/home/you/.nvm/versions/node/v22.11.0/bin:/usr/local/bin:/usr/bin:/bin
 # nightly run at 01:00 UTC, all personas, real submissions
-0 1 * * *    cd /home/you/Apply-Agent && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
+0 1 * * *    cd /home/you/Apply-Agent && mkdir -p .state/runs/logs && bash scripts/nightly-orchestrator.sh --live >> .state/runs/logs/cron.log 2>&1
 # or: keep 3 parallel sessions of one persona alive all day
 */5 * * * *  cd /home/you/Apply-Agent && bash scripts/watchdog-sessions.sh primary 3 --live
 ```

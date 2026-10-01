@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# scripts/persona-push.sh <persona> <target> [max_rounds] [--dry-run]
+# scripts/persona-push.sh <persona> <target> [max_rounds] [--live]
 #
 # Run ONE persona on its own until it has <target> new submissions (counted from
 # when this push started), outside the nightly orchestrator — for "get this persona
 # to 75 today" without waiting for the night.
 #
-#   scripts/persona-push.sh primary 75
-#   scripts/persona-push.sh primary 3 1 --dry-run     # rehearse: fill + screenshot, submit nothing
+#   scripts/persona-push.sh primary 75 --live
+#   scripts/persona-push.sh primary 3 1              # rehearse: fill + screenshot, submit nothing
 #
-# A push is a deliberate human command, so it submits unless --dry-run is given.
+# DRY RUN UNLESS --live, like every unattended path: a push can run for hours.
 #
 # - lock per persona, so two pushes for the same persona can't overlap
 # - waits (doesn't count a round) while an orchestrator round for the same
@@ -20,9 +20,21 @@ set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 # Cron has a minimal PATH; find node the way an interactive shell would.
 . scripts/lib/ensure-node.sh
-MODE="--live"; ARGS=()
-for a in "$@"; do [ "$a" = "--dry-run" ] && MODE="--dry-run" || ARGS+=("$a"); done
-P="${ARGS[0]:?persona}"; TARGET="${ARGS[1]:?target}"; MAX_ROUNDS="${ARGS[2]:-12}"
+USAGE="usage: persona-push.sh <persona> <target> [max_rounds] [--live|--dry-run]"
+MODE="--dry-run"; ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --live)    MODE="--live" ;;
+    --dry-run) MODE="--dry-run" ;;
+    -h|--help) echo "$USAGE"; exit 2 ;;
+    -*)        echo "unknown flag: $a" >&2; echo "$USAGE" >&2; exit 2 ;;
+    *)         ARGS+=("$a") ;;
+  esac
+done
+P="${ARGS[0]:-}"; TARGET="${ARGS[1]:-}"; MAX_ROUNDS="${ARGS[2]:-12}"
+[ -n "$P" ] && [ -n "$TARGET" ] || { echo "$USAGE" >&2; exit 2; }
+case "$TARGET$MAX_ROUNDS" in *[!0-9]*) echo "target and max_rounds must be whole numbers" >&2; echo "$USAGE" >&2; exit 2 ;; esac
+[ "$MODE" = "--dry-run" ] && echo "=== persona-push: DRY RUN (pass --live to submit) ===" >&2
 LOG_DIR=".state/runs/logs"; mkdir -p "$LOG_DIR"
 exec 8>".state/push-$P.lock"
 flock -n 8 || { echo "push for $P already running"; exit 0; }
