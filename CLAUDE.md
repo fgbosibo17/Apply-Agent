@@ -110,7 +110,7 @@ LOGGED_IN_BOARDS: linkedin, builtin, wellfound, workatastartup, welcometothejung
 > - **no schema gate** — an older checkout silently drops fields newer code wrote
 > - **no digest** — the run reports nothing an orchestrator can read
 >
-> `scripts/go.sh` is the envelope that does all of it: git pull, deps, doctor, state
+> `scripts/go.sh` is the envelope that does all of it: git pull (private data repos only), deps, doctor, state
 > pull, round start (lock + semaphore + resume/disk/schema preflight), discovery,
 > tailoring, the apply batches via `scripts/run-persona.sh`, round complete, commit and
 > push (only in a private repo marked `.private-data-repo`), GC, state push, and a digest on stdout. `scripts/nightly-run.sh` is the same

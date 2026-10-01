@@ -172,6 +172,15 @@ env_git_pull() {
   step git-pull "git pull --ff-only"
   if [ ! -d .git ]; then say "    not a git checkout — skipping"; return 0; fi
   if [ "${ENV_SKIP_GIT:-0}" = "1" ]; then say "    skipped (ENV_SKIP_GIT)"; ENV_GIT_CHANGED=0; ENV_LOCK_CHANGED=0; return 0; fi
+  # Pulling before every run is for a repo that is SHARED between machines — a private
+  # data repo (.private-data-repo), or one that opts in with APPLY_AGENT_GIT_PULL=1. A
+  # plain clone of the public template updates when its owner runs `git pull`: pulling
+  # unattended would bring in new code overnight, and a change to a file the user has
+  # edited (src/personas.js) would stop the whole night.
+  if [ ! -f .private-data-repo ] && [ "${APPLY_AGENT_GIT_PULL:-0}" != "1" ]; then
+    say "    skipped — this checkout updates when you run git pull (APPLY_AGENT_GIT_PULL=1 pulls before every run)"
+    ENV_GIT_CHANGED=0; ENV_LOCK_CHANGED=0; return 0
+  fi
   # Non-interactive for real: a scheduled run has no terminal to type a password into, and
   # a git that waits for one hangs the whole night instead of failing in a second.
   export GIT_TERMINAL_PROMPT=0

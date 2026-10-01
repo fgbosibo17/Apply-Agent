@@ -10,6 +10,15 @@ Newest first.
 ## [Unreleased]
 ### Added
 - **LICENSE** (MIT), matching the `license` field package.json already declared.
+- `scripts/stop-now.sh` — stop whatever is running on this machine (the job in flight
+  finishes; rounds left open by a crash are closed at once). Handy from another
+  computer: `ssh you@server "cd job-agent && bash scripts/stop-now.sh"`.
+
+### Changed
+- Runs no longer `git pull` before starting unless the repo is a private data repo
+  (`.private-data-repo`) or `APPLY_AGENT_GIT_PULL=1` is set. A clone of this public
+  repo updates when you run `git pull` yourself, so no new code arrives under a
+  scheduled night and an edited `src/personas.js` can never stop one.
 
 ## [0.1.5] - 2026-10-01
 _Run it all night on a Linux server: a scheduled orchestrator, parallel sessions,

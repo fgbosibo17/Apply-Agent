@@ -172,7 +172,7 @@ Put the agent on an always-on Linux box and let it apply overnight, every night,
 - A **Linux server** (Ubuntu/Debian, x86-64 — Google Chrome has no Linux ARM build) — a cloud VM or a spare machine. Budget **~2 GB of RAM per browser** you run at once. Run the agent as a normal user, not root.
 - **Node 20+**, **Google Chrome** (`google-chrome-stable`), **xvfb** (a virtual screen) and **x11vnc** (to log in once).
 - **A real VM or machine, not a locked-down container.** Inside Docker/LXC, Chrome's sandbox needs `--security-opt seccomp=unconfined --cap-add SYS_ADMIN`; without it Chrome crashes on start.
-- **A private place for your profile.** Your filled-in `src/personas.js` and resumes contain your identity — never push them to a public fork. Either click **"Use this template" → Private** on GitHub, or copy those files to the server with `scp`.
+- **Your details stay on the server.** You clone this repo onto the server and fill in your persona there. Your filled-in `src/personas.js` and resume contain your identity: never push them to a public repo. (Want your profile in git too, so a laptop and the server share it? Push your copy to a **private** repo of your own instead.)
 
 ```bash
 # Node 22 via nvm, as your normal user
@@ -187,17 +187,17 @@ sudo apt-get install -y ./google-chrome-stable_current_amd64.deb xvfb x11vnc
 
 ```bash
 # on the server
-git clone <your private copy> job-agent && cd job-agent
+git clone https://github.com/fgbosibo17/Apply-Agent.git job-agent && cd job-agent
 
-# on your laptop — only if your resumes and personas.js aren't in your private repo
-scp Resume/*.pdf you@server:~/job-agent/Resume/
-scp src/personas.js you@server:~/job-agent/src/
+# on your laptop: copy your resume to the server
+scp MyResume.pdf you@server:~/job-agent/Resume/
 
-# back on the server
+# on the server: fill in your persona (Part 1, step 2), then check the machine
+nano src/personas.js
 bash scripts/bootstrap.sh
 ```
 
-Fill in your persona(s) in `src/personas.js` first (Part 1, step 2) — on the server, or on your laptop and copy it over. Example personas you leave untouched are skipped with a warning; you can also delete them.
+Example personas you leave untouched are skipped with a warning; you can also delete them. Editing on the server is easiest from your laptop with VS Code's **Remote - SSH** extension, which opens the server's folder as if it were local.
 
 `bootstrap.sh` installs dependencies and hands over to `npm run doctor`, which checks Node, Playwright, **real Chrome**, `xvfb`, disk, the ledger, every persona's resume, and that each browser profile exists. Every failure prints exactly what to do about it.
 
@@ -215,7 +215,7 @@ It starts a virtual screen with a VNC server on it (localhost only) and opens Ch
 ssh -N -L 5900:localhost:5900 you@server     # leave this running
 ```
 
-and open a VNC viewer at `localhost:5900` (macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`; Windows: TigerVNC or RealVNC). Sign in to Google first (needed to read the email security codes some ATSs send), then LinkedIn, and close Chrome — the script saves the login and exits (and says so plainly if Chrome crashed instead). Repeat for each profile (`secondary`, …). Then confirm each one is signed in to Google:
+and open a VNC viewer at `localhost:5900` (RealVNC Viewer or TigerVNC on Mac or Windows; macOS's built-in Screen Sharing may refuse a VNC server with no password). Sign in to Google first (needed to read the email security codes some ATSs send), then LinkedIn, and close Chrome — the script saves the login and exits (and says so plainly if Chrome crashed instead). Repeat for each profile (`secondary`, …). Then confirm each one is signed in to Google:
 
 ```bash
 python3 scripts/gmail-session-check.py
@@ -315,12 +315,21 @@ Locks make sure the two machines never use the same browser profile at the same 
 ```bash
 npm run agent -- digest --since 1d                 # last night's results
 npm run agent -- round list                        # recent runs
-npm run agent -- round stop --round <id>           # stop gracefully (finishes the job in flight)
+bash scripts/stop-now.sh                           # stop whatever is running now (the job in flight finishes)
+npm run agent -- round stop --round <id>           # stop one round gracefully
 bash scripts/stop-sessions.sh primary              # stop all parallel sessions of a persona
 npm run agent -- round locks                       # who holds which profile, and how stale
 npm run agent -- round unlock --force --persona primary   # only if that run is definitely dead
 npm run agent -- gc                                # clean old screenshots, logs, rendered PDFs
 ```
+
+**Updating.** Runs never pull new code by themselves (unless the repo is a private data repo, or `APPLY_AGENT_GIT_PULL=1` is set), so nothing changes under a scheduled night. To update when you choose:
+
+```bash
+cd ~/job-agent && git stash && git pull && git stash pop && npm ci
+```
+
+`git stash` sets your persona edits aside while the new version comes in, and `git stash pop` puts them back.
 
 The full operator's guide — locks, S3, resume tailoring storage, the orchestrator endpoints — is in **[ONBOARDING.md → Running on a second machine](ONBOARDING.md)**.
 
@@ -493,6 +502,7 @@ scripts/
   bootstrap.sh        set up a new machine, then `npm run doctor`
   login-profile.sh    log a persona in once on a headless server, over VNC
   stop-sessions.sh    stop (and pause) a persona's parallel sessions cleanly
+  stop-now.sh         stop whatever is running on this machine, now
   notify-telegram.py, gmail-session-check.py   optional alerts
 data/companies.json   public ATS company tokens (the discovery seed) — shareable, no personal data
 CLAUDE.md             instructions + setup wizard for Claude Code

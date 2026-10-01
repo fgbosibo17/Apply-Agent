@@ -100,3 +100,37 @@ test('the laptop login helper and the runner use the same cookie-encryption flag
     assert.ok(sh.includes(flag), `login-profile.sh passes ${flag}`);
   }
 });
+
+// ── stop-now.sh ────────────────────────────────────────────────────────────
+
+function withState() {
+  const dir = tmpdir();
+  return { ...process.env, APPLY_AGENT_STATE_DIR: dir, STOP_WAIT_SEC: '1' };
+}
+
+test('stop-now.sh with nothing running says so and exits 0', () => {
+  const r = spawnSync(BASH, ['scripts/stop-now.sh'], { cwd: REPO, env: withState(), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /nothing is running/);
+});
+
+test('stop-now.sh closes a round whose run already died, without waiting on it', () => {
+  const env = withState();
+  // An open round with no live lock holder — what a crash leaves behind.
+  const open = spawnSync(process.execPath, ['-e', `
+    const rounds = require('./src/core/rounds');
+    const r = rounds.start({ persona: 'primary', target: 1 }, { preflight: false, guards: false, schema: false });
+    console.log(r.id);
+  `], { cwd: REPO, env, encoding: 'utf8' });
+  assert.equal(open.status, 0, open.stderr);
+  const id = open.stdout.trim();
+
+  const r = spawnSync(BASH, ['scripts/stop-now.sh'], { cwd: REPO, env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, new RegExp(`closing round ${id} \\(its run is no longer alive\\)`));
+
+  const after = spawnSync(process.execPath, ['-e', `console.log(JSON.stringify(require('./src/core/rounds').status('${id}')))`],
+    { cwd: REPO, env, encoding: 'utf8' });
+  const st = JSON.parse(after.stdout);
+  assert.equal(st.running, false, 'the orphaned round is closed');
+});
